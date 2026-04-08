@@ -1,77 +1,301 @@
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0d1117,50:161b22,100:0d1117&height=220&section=header&text=%20Galaxy%20Brain%20Bot&fontSize=52&fontColor=58a6ff&animation=fadeIn&fontAlignY=40&desc=GitHub%20Discussions%20Automation%20%7C%20Research%20%26%20Education&descAlignY=60&descColor=8b949e" width="100%"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0d1117,25:0d2137,50:0a3d62,75:0d2137,100:0d1117&height=260&section=header&text=🧠%20Galaxy%20Brain%20Bot&fontSize=58&fontColor=58a6ff&animation=fadeIn&fontAlignY=38&desc=GitHub%20Discussions%20Automation%20%7C%20Built%20for%20Learning&descAlignY=58&descColor=8b949e&stroke=1c3a5e&strokeWidth=2" width="100%"/>
 
 <br/>
 
-<img src="https://img.shields.io/badge/Python-3.8%2B-3776ab?style=for-the-badge&logo=python&logoColor=white"/>
-<img src="https://img.shields.io/badge/License-MIT-22863a?style=for-the-badge&logo=opensourceinitiative&logoColor=white"/>
+<!-- Animated typing banner -->
+<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=700&size=22&duration=2500&pause=800&color=58A6FF&center=true&vCenter=true&width=680&lines=Auto-discovers+open+GitHub+Discussions;Generates+answers+via+18%2B+free+LLMs;Circuit+breakers+%2B+smart+rate+limiting;Tracks+your+Galaxy+Brain+badge+progress;Educational+research+tool+%E2%80%94+use+it+wisely" alt="Typing SVG" />
+
+<br/><br/>
+
+<!-- Core badges row 1 -->
+<a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/Python-3.8%2B-3776ab?style=for-the-badge&logo=python&logoColor=white"/></a>
+<a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-22863a?style=for-the-badge&logo=opensourceinitiative&logoColor=white"/></a>
+<a href="https://openrouter.ai"><img src="https://img.shields.io/badge/OpenRouter-18%2B%20Free%20Models-7c3aed?style=for-the-badge&logo=openai&logoColor=white"/></a>
 <img src="https://img.shields.io/badge/Purpose-Educational%20Only-e3b341?style=for-the-badge&logo=bookstack&logoColor=white"/>
-<img src="https://img.shields.io/badge/OpenRouter-18%2B%20Free%20Models-7c3aed?style=for-the-badge&logo=openai&logoColor=white"/>
 
-<br/><br/>
+<br/>
 
+<!-- Core badges row 2 -->
 <img src="https://img.shields.io/badge/GitHub%20GraphQL-API%20v4-0969da?style=for-the-badge&logo=github&logoColor=white"/>
-<img src="https://img.shields.io/badge/Circuit%20Breakers-Resilient%20Design-16a34a?style=for-the-badge&logo=electrical&logoColor=white"/>
-<img src="https://img.shields.io/badge/Adaptive%20Rate%20Limiting-Smart%20Backoff-dc2626?style=for-the-badge&logo=speedtest&logoColor=white"/>
-<img src="https://img.shields.io/badge/Multi--Model-AI%20Rotation-0ea5e9?style=for-the-badge&logo=anthropic&logoColor=white"/>
+<img src="https://img.shields.io/badge/Circuit%20Breakers-Resilient%20Design-16a34a?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/Adaptive%20Rate%20Limiting-Smart%20Backoff-dc2626?style=for-the-badge"/>
+<img src="https://img.shields.io/badge/Multi--Model%20AI-Round%20Robin%20Rotation-0ea5e9?style=for-the-badge"/>
 
 <br/><br/>
 
-<img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=600&size=18&duration=2800&pause=900&color=58A6FF&center=true&vCenter=true&width=620&lines=Auto-discovers+GitHub+Discussion+threads;Rotates+18%2B+free+AI+models+via+OpenRouter;Circuit+breakers+%2B+adaptive+rate+limiting;Badge+progress+tracker+%2B+Discord%2FSlack+webhooks;Educational+research+tool+—+use+responsibly" alt="Typing SVG"/>
+<!-- Live stats counters (animated on GitHub) -->
+<img src="https://img.shields.io/github/stars/itxashancode/Galaxy-Brain-Automation?style=social"/>
+<img src="https://img.shields.io/github/forks/itxashancode/Galaxy-Brain-Automation?style=social"/>
+<img src="https://img.shields.io/github/watchers/itxashancode/Galaxy-Brain-Automation?style=social"/>
 
 </div>
 
 ---
 
-> **⚠️ For educational and research purposes only.**
-> This project demonstrates GitHub GraphQL API automation, multi-model LLM orchestration, and resilient HTTP client design patterns. It was built to study how bots interact with discussion platforms and how rate-limiting, circuit breakers, and model rotation work in practice. Running it against real GitHub repositories without understanding the implications could get your account flagged or banned. Read GitHub's [Acceptable Use Policy](https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies) before you do anything.
+> **⚠️ Heads up before you run anything.**
+> This is an educational project. It demonstrates GitHub GraphQL automation, multi-model LLM orchestration, and how production-grade HTTP clients handle failure. Running it blind against real repos without reading the output could get your GitHub account flagged. Read GitHub's [Acceptable Use Policy](https://docs.github.com/en/site-policy/acceptable-use-policies/github-acceptable-use-policies) first. This isn't to cover bases — it's because the bot is powerful enough to do real damage if you're careless with it.
 
 ---
 
-## What this is
+## What it actually does
 
-Galaxy Brain Bot searches public GitHub repositories for open Discussion threads, generates answers using free LLMs via OpenRouter, and optionally posts them. It tracks which answers get marked as "Accepted" so you can watch your [Galaxy Brain badge](https://docs.github.com/en/discussions/guides/finding-your-discussions) progress.
+<div align="center">
 
-The codebase is more interesting than it sounds. It has:
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    🧠 GALAXY BRAIN BOT                          │
+│                   High-Level Overview                           │
+└─────────────────────────────────────────────────────────────────┘
 
-- A proper circuit breaker that stops hammering a failing endpoint after N consecutive errors
-- Adaptive rate limiting that reads `Retry-After` headers and backs off intelligently
-- A round-robin API key manager that rotates across multiple OpenRouter keys
-- TTL-based in-memory caching to avoid redundant GraphQL fetches within a session
-- Multi-modal support — it can pull image context from discussion posts if the model supports vision
-- Link fetching that grabs external page content and feeds it into the prompt
-- Discord and Slack webhook notifications for accepted answers
+  You run the bot
+       │
+       ▼
+  ┌─────────────┐      GraphQL v4       ┌──────────────────────┐
+  │  Discovery  │ ──────────────────▶  │  GitHub Discussions  │
+  │  Engine     │ ◀──────────────────  │  (open threads)      │
+  └─────────────┘   paginated results  └──────────────────────┘
+       │
+       ▼
+  ┌─────────────┐     already answered?   ┌──────────────────┐
+  │  Filter     │ ───────────────────────▶│  Stats JSON      │
+  │  + Dedup    │ ◀───────────────────────│  (skip if found) │
+  └─────────────┘                         └──────────────────┘
+       │
+       ▼
+  ┌─────────────┐     prompt + context    ┌──────────────────┐
+  │  LLM Layer  │ ──────────────────────▶│  OpenRouter API  │
+  │  (18 models)│ ◀──────────────────────│  free tier       │
+  └─────────────┘     generated answer   └──────────────────┘
+       │
+       ▼
+  ┌─────────────┐   you confirm (y/n)
+  │  Post /     │ ──────────────────────▶ GitHub Discussion reply
+  │  Skip       │
+  └─────────────┘
+       │
+       ▼
+  ┌─────────────┐
+  │  Track it   │ ──▶ galaxy_brain_stats.json
+  │  + notify   │ ──▶ Discord / Slack webhook
+  └─────────────┘
+```
 
-None of these are exotic. They're the patterns any production bot needs. The code is readable and each component is isolated enough that you can pull pieces out for other projects.
+</div>
+
+Galaxy Brain Bot finds open GitHub Discussion threads, generates answers using free LLMs through OpenRouter, and optionally posts them under your account. It then watches for accepted answers so you can track your [Galaxy Brain badge](https://docs.github.com/en/discussions/guides/finding-your-discussions) progress.
+
+The interesting part isn't the badge farming. It's the infrastructure underneath: circuit breakers, adaptive rate limiting, key rotation, TTL caching, graceful shutdown. These are the patterns any production bot needs, and they're all here in readable Python.
+
+---
+
+## Architecture deep-dive
+
+### How the pieces connect
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│                        SYSTEM ARCHITECTURE                           │
+├──────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│   ┌──────────────┐    ┌──────────────┐    ┌──────────────────────┐  │
+│   │ Shutdown     │    │ InMemory     │    │ CircuitBreaker        │  │
+│   │ Handler      │    │ Cache        │    │ (per endpoint)        │  │
+│   │              │    │              │    │                       │  │
+│   │ SIGINT/TERM  │    │ TTL: 300s    │    │ threshold → open     │  │
+│   │ sets flag    │    │ dict+stamps  │    │ timeout  → half-open │  │
+│   └──────┬───────┘    └──────┬───────┘    └──────────┬───────────┘  │
+│          │                  │                        │              │
+│          └──────────────────┼────────────────────────┘              │
+│                             ▼                                        │
+│                    ┌────────────────┐                                │
+│                    │  GitHub        │                                │
+│                    │  GraphQL v4    │                                │
+│                    │  Client        │                                │
+│                    └───────┬────────┘                                │
+│                            │                                         │
+│          ┌─────────────────┼──────────────────┐                     │
+│          ▼                 ▼                  ▼                     │
+│   ┌─────────────┐  ┌─────────────┐  ┌──────────────┐               │
+│   │ Discovery   │  │ Comment     │  │ Badge        │               │
+│   │ (topics,    │  │ Reader      │  │ Progress     │               │
+│   │  stars,     │  │ (avoids     │  │ Tracker      │               │
+│   │  recency)   │  │  duplicates)│  │              │               │
+│   └─────────────┘  └─────────────┘  └──────────────┘               │
+│                             │                                        │
+│                             ▼                                        │
+│                    ┌────────────────┐                                │
+│                    │  KeyManager    │                                │
+│                    │  + ModelTracker│                                │
+│                    │                │                                │
+│                    │  round-robin   │                                │
+│                    │  keys/models   │                                │
+│                    └───────┬────────┘                                │
+│                            │                                         │
+│                            ▼                                         │
+│                    ┌────────────────┐                                │
+│                    │  OpenRouter    │                                │
+│                    │  18+ free LLMs │                                │
+│                    └────────────────┘                                │
+│                                                                      │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### CircuitBreaker — the failure handler
+
+This is the most underrated piece in the codebase. Without it, when an endpoint goes down, the bot hammers it until the session ends.
+
+```
+┌──────────────────────────────────────────────────────┐
+│              CIRCUIT BREAKER STATE MACHINE           │
+├──────────────────────────────────────────────────────┤
+│                                                      │
+│         requests                 N consecutive       │
+│         succeed                  failures            │
+│    ┌──────────────┐         ┌──────────────┐         │
+│    │              │ ──────▶ │              │         │
+│    │   CLOSED     │         │    OPEN      │         │
+│    │ (normal ops) │ ◀────── │ (blocked)    │         │
+│    │              │  probe  │              │         │
+│    └──────────────┘ success └──────┬───────┘         │
+│                                    │ timeout          │
+│                                    ▼ expires          │
+│                           ┌──────────────┐            │
+│                           │  HALF-OPEN   │            │
+│                           │ (let 1 probe │            │
+│                           │  through)    │            │
+│                           └──────────────┘            │
+│                                                       │
+│  Configurable:  threshold=5 failures                  │
+│                 timeout=120 seconds                   │
+└───────────────────────────────────────────────────────┘
+```
+
+Three states. Closed means everything's fine — requests go through. Open means something broke — requests are blocked without hitting the endpoint. Half-open means the timeout expired and one probe gets through. If it succeeds, back to closed. If it fails, back to open.
+
+You can tune `CIRCUIT_BREAKER_THRESHOLD` and `CIRCUIT_BREAKER_TIMEOUT` in `.env`.
+
+### Adaptive rate limiting
+
+Not all rate limiting is equal. Respecting the headers the server sends back is smarter than just sleeping for a fixed amount.
+
+```
+┌─────────────────────────────────────────────────────┐
+│           ADAPTIVE BACKOFF DECISION TREE            │
+├─────────────────────────────────────────────────────┤
+│                                                     │
+│         API responds with 429 or 403                │
+│                     │                               │
+│                     ▼                               │
+│         ┌─────────────────────┐                     │
+│         │  Retry-After        │                     │
+│         │  header present?    │                     │
+│         └──────────┬──────────┘                     │
+│               yes  │  no                            │
+│          ┌─────────┴──────────┐                     │
+│          ▼                    ▼                     │
+│   sleep(Retry-After)   X-RateLimit-Reset            │
+│          │             header present?              │
+│          │                   │                      │
+│          │           yes     │    no                │
+│          │       ┌───────────┴────────┐             │
+│          │       ▼                   ▼              │
+│          │  sleep until          exponential        │
+│          │  reset time           backoff            │
+│          │                    (2^n seconds)         │
+│          └────────────────────────┘                 │
+│                     │                               │
+│                     ▼                               │
+│              retry request                          │
+└─────────────────────────────────────────────────────┘
+```
+
+### Model rotation
+
+The bot doesn't just call one model and give up if it's slow. It cycles through 18+ free models on OpenRouter, skipping any that return empty responses, 429s, or 404s.
+
+```
+┌────────────────────────────────────────────────────────┐
+│              MODEL ROTATION FLOW                       │
+├────────────────────────────────────────────────────────┤
+│                                                        │
+│  Model list (18+ free-tier models)                     │
+│  [qwen3.6-plus, llama-3.3-70b, gemma-3-27b, ...]       │
+│                │                                       │
+│                ▼                                       │
+│       ┌──────────────┐                                 │
+│       │  Try model 1 │                                 │
+│       └──────┬───────┘                                 │
+│         good │   bad (empty / 429 / 404)               │
+│              │         │                               │
+│              ▼         ▼                               │
+│        use answer  log failure                         │
+│              │         │                               │
+│              │         ▼                               │
+│              │   try model 2 → model 3 → ...           │
+│              │                                         │
+│              ▼                                         │
+│       ModelTracker records:                            │
+│         - success count                                │
+│         - failure count                                │
+│         - average latency (ms)                         │
+└────────────────────────────────────────────────────────┘
+```
+
+At the end of a session, `--models` shows you a table of which models worked, how often, and how fast.
 
 ---
 
 ## Features
 
 ### Core
-- **Auto-discovery** — finds repos by topic tags, star count, and activity recency. No hardcoded lists.
-- **Smart deduplication** — persists answered discussion IDs to `galaxy_brain_stats.json` so it never double-posts across sessions
-- **CoC-aware filtering** — skips repos with codes of conduct that restrict automated participation
-- **Comment-aware** — reads existing comments before answering to avoid redundant replies
+
+- **Auto-discovery** — finds repos using topic tags, star counts, and activity recency. No hardcoded lists needed.
+- **Smart deduplication** — saves answered discussion IDs to `galaxy_brain_stats.json` so the bot never double-posts across sessions.
+- **CoC-aware filtering** — skips repos with codes of conduct that restrict automated participation (not perfect, but it tries).
+- **Comment-aware** — reads existing replies before generating an answer so it doesn't pile on something already covered.
 
 ### Reliability
-- **Circuit breakers** — per-endpoint, configurable threshold and timeout
-- **Adaptive backoff** — respects `Retry-After`, `X-RateLimit-Reset`, and falls back to exponential delays
-- **Key rotation** — cycles through multiple OpenRouter API keys when one hits rate limits
-- **Model rotation** — tries 18+ free models in order and skips broken ones automatically
 
-### AI Integration
-- **18+ free models** via OpenRouter — Qwen, Llama, Gemma, Nemotron, GPT-OSS, and more
-- **Vision support** — detects if a model supports images and includes them when relevant
-- **Link fetching** — pulls external URLs from discussion bodies for richer context
-- **Configurable answer length** — min/max character limits prevent low-effort one-liners
+- **Circuit breakers** — per endpoint, configurable threshold and timeout (see diagram above).
+- **Adaptive backoff** — reads `Retry-After`, `X-RateLimit-Reset`, and falls back to exponential delays when neither header is present.
+- **Key rotation** — cycles multiple OpenRouter API keys when one hits a rate limit.
+- **Model rotation** — tries 18+ free models in order and skips broken ones automatically.
+
+### AI integration
+
+- **18+ free models** via OpenRouter — Qwen, Llama, Gemma, Nemotron, and more.
+- **Vision support** — detects if a model handles images and includes them from the discussion when relevant.
+- **Link fetching** — pulls external URLs from discussion bodies for richer context before generating an answer.
+- **Configurable answer length** — min/max character limits stop one-liner garbage from getting posted.
 
 ### Tracking
-- **Badge progress** — shows your accepted answer count and which tier you're on
-- **Stats by org** — breaks down your answers by repository owner
-- **Session model performance** — tracks which AI models succeed vs. fail and their latency
-- **Webhook notifications** — Discord/Slack alerts on new acceptances and session summaries
+
+- **Badge progress** — shows accepted answer count and current tier toward the Galaxy Brain badge.
+- **Stats by org** — breaks down your answers by repository owner.
+- **Session model performance** — tracks which AI models succeed vs. fail and their latency.
+- **Webhook notifications** — Discord and Slack alerts on new acceptances and session summaries.
+
+---
+
+## Galaxy Brain badge tiers
+
+<div align="center">
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  🥉 BRONZE    8 accepted answers
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  🥈 SILVER   16 accepted answers
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  🥇 GOLD     32 accepted answers
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+The bot shows your current tier and how many accepted answers you need for the next one. Run `--stats` to check anytime.
+
+</div>
 
 ---
 
@@ -81,8 +305,8 @@ None of these are exotic. They're the patterns any production bot needs. The cod
 
 ```bash
 # Clone the repo
-git clone https://github.com/YOUR_USERNAME/galaxy-brain-bot.git
-cd galaxy-brain-bot
+git clone https://github.com/itxashancode/Galaxy-Brain-Automation.git
+cd Galaxy-Brain-Automation
 
 # Install dependencies
 pip install -r requirements.txt
@@ -92,7 +316,7 @@ cp .env.template .env
 nano .env
 ```
 
-**Requirements file:**
+`requirements.txt`:
 ```
 requests>=2.31.0
 rich>=13.7.0
@@ -103,61 +327,63 @@ python-dotenv>=1.0.0
 
 ## Configuration
 
-Create a `.env` file in the project root:
+Create a `.env` file in the project root. Every option has a comment explaining what it does.
 
 ```env
-# GitHub — needs read:discussion and write:discussion scopes
+# ── GitHub ─────────────────────────────────────────────────────
+# needs read:discussion and write:discussion scopes
 GITHUB_TOKEN=ghp_your_token_here
 GITHUB_USERNAME=your_github_username
 
-# OpenRouter — comma-separated if you have multiple keys
+# ── OpenRouter ─────────────────────────────────────────────────
+# comma-separated if you have multiple keys
 OPENROUTER_KEYS=sk-or-v1-your_key_here
 
-# Optional: override which models to use (defaults to the 18-model list in bot)
+# optional: override the model list (defaults to 18-model rotation)
 # OPENROUTER_MODELS=qwen/qwen3.6-plus:free,meta-llama/llama-3.3-70b-instruct:free
 
-# Webhook notifications (optional)
+# ── Webhooks (optional) ────────────────────────────────────────
 DISCORD_WEBHOOK_URL=
 SLACK_WEBHOOK_URL=
 
-# Bot behavior
+# ── Bot behavior ───────────────────────────────────────────────
 MIN_REPO_STARS=10
 MAX_ANSWERS_PER_SESSION=5
 DELAY_BETWEEN_ANSWERS=5
-AUTO_APPROVE_ANSWERS=false
+AUTO_APPROVE_ANSWERS=false       # keep this false until you trust the output
 
-# Discovery
+# ── Discovery ──────────────────────────────────────────────────
 DISCOVERY_TOPICS=python,javascript,open-source,programming
 DISCOVERY_MIN_STARS=5
 DISCOVERY_MAX_REPOS=50
 
-# Answer length
-ANSWER_MIN_CHARS=120
+# ── Answer quality ─────────────────────────────────────────────
+ANSWER_MIN_CHARS=120             # prevents one-liner garbage
 ANSWER_MAX_CHARS=900
 
-# Performance tuning
+# ── Performance ────────────────────────────────────────────────
 CACHE_TTL_SECONDS=300
 CIRCUIT_BREAKER_THRESHOLD=5
 CIRCUIT_BREAKER_TIMEOUT=120
 RECENT_HOURS=24
 ```
 
-**Getting your GitHub token:** Go to `Settings → Developer settings → Personal access tokens → Tokens (classic)`. Enable `repo` and `write:discussion` scopes.
+**Getting a GitHub token:** `Settings → Developer settings → Personal access tokens → Tokens (classic)`. Enable `repo` and `write:discussion`.
 
-**Getting an OpenRouter key:** Sign up at [openrouter.ai](https://openrouter.ai), go to Keys, create a free key. The bot only uses `:free` tier models by default, so it won't charge you anything.
+**Getting an OpenRouter key:** Sign up at [openrouter.ai](https://openrouter.ai), go to Keys, create a free key. The bot only uses `:free` tier models by default — it won't cost you anything.
 
 ---
 
 ## Usage
 
 ```bash
-# Run a full session (finds discussions, generates answers, asks before posting)
+# Full session: finds discussions, generates answers, asks before posting
 python galaxy_brain_bot.py
 
 # Run tests first to verify your setup
 python test_bot.py
 
-# Skip posting, just see what answers it would generate
+# Test mode: generate answers without posting anything
 python galaxy_brain_bot.py --test
 
 # Check if any previously posted answers were accepted
@@ -166,45 +392,143 @@ python galaxy_brain_bot.py --check
 # Show your accumulated stats
 python galaxy_brain_bot.py --stats
 
-# Show which AI models performed well this session
+# Show model performance from this session
 python galaxy_brain_bot.py --models
 
-# Override topics and star threshold for this session
+# Override topics and star threshold for this session only
 python galaxy_brain_bot.py --topics rust,go,cli --min-stars 50
 
-# Clear the in-memory cache at startup
+# Clear in-memory cache at startup
 python galaxy_brain_bot.py --cache-clear
 ```
 
 ---
 
-## How the model rotation works
+## Session flow — what actually happens when you run it
 
-The bot tries models in order. If a model returns an empty response, a 429, or a 404, it logs that failure and moves to the next one. At the end of each session, `--models` shows you a table of which models succeeded, how many times they failed, and their average response latency.
-
-Default order (all free tier):
 ```
-qwen/qwen3.6-plus:free
-stepfun/step-3.5-flash:free
-nvidia/nemotron-3-super-120b-a12b:free
-arcee-ai/trinity-large-preview:free
-z-ai/glm-4.5-air:free
-nvidia/nemotron-3-nano-30b-a3b:free
-minimax/minimax-m2.5:free
-openai/gpt-oss-120b:free
-meta-llama/llama-3.3-70b-instruct:free
-google/gemma-3-27b-it:free
-... and more
+┌──────────────────────────────────────────────────────────────────────┐
+│                    FULL SESSION FLOWCHART                            │
+└──────────────────────────────────────────────────────────────────────┘
+
+   python galaxy_brain_bot.py
+              │
+              ▼
+   ┌──────────────────────┐
+   │  Load .env config    │
+   │  Init all components │
+   │  (cache, breakers,   │
+   │   key/model managers)│
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │  Discovery phase     │◀── DISCOVERY_TOPICS, MIN_STARS, RECENT_HOURS
+   │  GraphQL → find repos│
+   │  with open Discussions│
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │  Filter repos        │◀── CoC check, star threshold, dedup
+   │  Skip already-done   │
+   │  Skip CoC-restricted │
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │  For each discussion │
+   │  that passes filters:│
+   └──────────┬───────────┘
+              │
+        ┌─────┴──────┐
+        ▼            ▼
+  fetch body    fetch existing
+  + images      comments
+  + linked URLs
+        │            │
+        └─────┬──────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │  Build prompt        │
+   │  (body + context     │
+   │   + existing replies)│
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │  Send to OpenRouter  │◀── tries model 1 → 2 → 3 ... (rotation)
+   │  Get answer back     │
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │  Length check        │
+   │  (MIN_CHARS/MAX_CHARS)│
+   └──────────┬───────────┘
+              │
+              ▼
+   ┌──────────────────────┐
+   │  Show answer to you  │
+   │  → confirm (y/n)?    │◀── AUTO_APPROVE_ANSWERS=false
+   └──────────┬───────────┘
+              │
+         yes  │  no
+     ┌────────┴────────┐
+     ▼                 ▼
+  Post to          Skip it,
+  GitHub           log it
+     │
+     ▼
+  Save to
+  stats.json
+     │
+     ▼
+  Fire webhooks
+  (Discord/Slack)
+              │
+              ▼
+   ┌──────────────────────┐
+   │  Session summary     │
+   │  (model performance, │
+   │   badge progress,    │
+   │   answers posted)    │
+   └──────────────────────┘
 ```
 
-Override with `OPENROUTER_MODELS=model1,model2` in your `.env`.
+---
+
+## Free models available (via OpenRouter)
+
+All of these are `:free` tier — no billing required.
+
+```
+┌─────────────────────────────────────────────┬──────────────┬────────┐
+│ Model                                       │ Vision       │ Size   │
+├─────────────────────────────────────────────┼──────────────┼────────┤
+│ qwen/qwen3.6-plus:free                      │ ✓            │ Large  │
+│ stepfun/step-3.5-flash:free                 │ ✓            │ Large  │
+│ nvidia/nemotron-3-super-120b-a12b:free      │              │ 120B   │
+│ arcee-ai/trinity-large-preview:free         │              │ Large  │
+│ z-ai/glm-4.5-air:free                       │              │ Medium │
+│ nvidia/nemotron-3-nano-30b-a3b:free         │              │ 30B    │
+│ minimax/minimax-m2.5:free                   │ ✓            │ Large  │
+│ openai/gpt-oss-120b:free                    │              │ 120B   │
+│ meta-llama/llama-3.3-70b-instruct:free      │              │ 70B    │
+│ google/gemma-3-27b-it:free                  │ ✓            │ 27B    │
+│ + 8 more in rotation                        │              │        │
+└─────────────────────────────────────────────┴──────────────┴────────┘
+```
+
+Override with `OPENROUTER_MODELS=model1,model2` in your `.env` if you want to pin specific ones.
 
 ---
 
 ## File structure
 
 ```
-galaxy-brain-bot/
+Galaxy-Brain-Automation/
 ├── galaxy_brain_bot.py        # Main bot — all logic lives here
 ├── galaxy_brain_stats.json    # Persisted answer history (auto-created)
 ├── galaxy_brain.log           # Session logs
@@ -217,95 +541,85 @@ galaxy-brain-bot/
 
 ---
 
-## Stats and badge tracking
+## Internal components
 
-The bot tracks everything in `galaxy_brain_stats.json`:
+Each component is isolated enough that you can pull it into other projects.
 
-```json
-{
-  "total_answers": 12,
-  "accepted_answers": 3,
-  "acceptance_rate": 0.25,
-  "answers": [...],
-  "answered_discussion_ids": [...]
-}
-```
-
-GitHub's Galaxy Brain badge tiers (as of 2025):
-- **Bronze** — 8 accepted answers
-- **Silver** — 16 accepted answers
-- **Gold** — 32 accepted answers
-
-The bot shows your current tier and how far you are from the next one.
-
----
-
-## Ethical use
-
-A few things worth saying plainly:
-
-1. **Don't spam.** The bot has `MAX_ANSWERS_PER_SESSION` for a reason. Posting 50 low-quality answers in an hour will get you flagged.
-2. **Read answers before posting.** `AUTO_APPROVE_ANSWERS=false` means the bot asks you to confirm each one. Keep it that way until you trust the output quality.
-3. **Check the repo's code of conduct.** Some repos explicitly prohibit automated responses. The bot tries to detect this, but it's not perfect.
-4. **Don't use it on repos where you'd be unwanted.** The point is to help people, not to farm badges.
-
-This tool was built to understand how automated discussion participation works, not to game GitHub. If you use it to post garbage at scale, that's on you.
-
----
-
-## Architecture notes
-
-For anyone who wants to understand the internals before modifying them:
-
-**`ShutdownHandler`** catches SIGINT/SIGTERM and sets a flag. All loops check `shutdown.requested` before each iteration, so Ctrl+C finishes the current task cleanly instead of corrupting the stats file.
-
-**`InMemoryCache`** is a simple dict with timestamps. The TTL defaults to 300 seconds. It prevents re-fetching the same GraphQL queries within a session when the bot is processing a large target list.
-
-**`CircuitBreaker`** opens after N consecutive failures, blocks requests for a timeout period, then half-opens to let one probe through. If the probe succeeds, it resets. This prevents the bot from hammering a broken endpoint for the entire session.
-
-**`KeyManager`** holds multiple OpenRouter keys and rotates to the next one when a key hits a rate limit. It also tracks per-key failure counts.
-
-**`ModelTracker`** records successes, failures, and latency per model. The session summary table at the end comes from this.
+| Component | What it does |
+|---|---|
+| `ShutdownHandler` | Catches SIGINT/SIGTERM, sets a flag. All loops check `shutdown.requested` before each iteration — Ctrl+C finishes cleanly instead of corrupting the stats file. |
+| `InMemoryCache` | Simple dict with timestamps. TTL defaults to 300 seconds. Prevents re-fetching the same GraphQL queries within a session. |
+| `CircuitBreaker` | Opens after N consecutive failures, blocks requests for a timeout, then half-opens to let one probe through. Resets on success. |
+| `KeyManager` | Holds multiple OpenRouter keys, rotates to the next when one hits rate limits, tracks per-key failure counts. |
+| `ModelTracker` | Records successes, failures, and latency per model. Generates the session summary table. |
 
 ---
 
 ## Running tests
 
 ```bash
-# Full test suite
+# Full test suite (run this before anything else)
 python test_bot.py
 
 # Quick credential check only
 python test_connection.py
 
-# Quick end-to-end (finds repos but doesn't post)
+# Quick end-to-end (finds repos, generates answers, doesn't post)
 python test_bot.py --quick
 ```
 
-The test suite checks imports, `.env` configuration, GitHub API auth, OpenRouter API auth (tries each key against multiple models), GraphQL access, and stats file I/O.
+The test suite checks: imports, `.env` config, GitHub API auth, OpenRouter API auth (tries each key against multiple models), GraphQL access, and stats file I/O. If it passes clean, the bot is ready to run.
 
 ---
 
-## License
+## Ethical use
 
-MIT — do what you want with the code, but don't blame me if something breaks.
+A few things worth saying plainly, not as legal cover but because they matter:
+
+1. **Don't spam.** `MAX_ANSWERS_PER_SESSION` exists for a reason. Fifty low-quality posts in an hour will get your account flagged, and it makes the Discussion threads worse for everyone.
+2. **Read the answers before posting.** `AUTO_APPROVE_ANSWERS=false` is the default. Keep it that way until you've seen enough output to trust the model on that type of question.
+3. **Check the repo's code of conduct.** Some repos explicitly prohibit automated responses. The bot tries to detect this, but it's not foolproof.
+4. **Don't post where you'd be unwanted.** The goal is to help people who are stuck, not to farm acceptances.
+
+The bot was built to understand how automated discussion participation works. If you use it to post garbage at scale, that's on you.
+
+---
+
+## Why this codebase is worth reading
+
+Most bot tutorials show you how to hit an API and print the response. This one actually handles failure.
+
+The circuit breaker is a real circuit breaker, not a `try/except` with a sleep. The rate limiting reads actual server headers instead of guessing. The key rotation is stateful and tracks per-key health. The shutdown handler means Ctrl+C doesn't leave a corrupted JSON file.
+
+These aren't exotic patterns. They're the basics every production bot needs, and they're all in one readable file.
 
 ---
 
 ## Contributing
 
-Open an issue or PR. The most useful contributions right now would be better prompt templates, additional model configs, or a smarter discussion-quality filter so the bot skips questions it's unlikely to answer well.
+Open an issue or PR. The most useful contributions right now are better prompt templates, more model configs, or a smarter discussion-quality filter that skips questions the bot is unlikely to answer well. PRs that just add more badges to this README will be closed immediately.
+
+---
+
+## License
+
+MIT. Do what you want with the code. If it breaks something, that's between you and your GitHub account.
 
 ---
 
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0d1117,50:161b22,100:0d1117&height=120&section=footer&animation=fadeIn" width="100%"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0d1117,50:0a3d62,100:0d1117&height=140&section=footer&animation=fadeIn&text=Built%20for%20learning.%20Use%20with%20your%20brain%2C%20not%20instead%20of%20it.&fontSize=16&fontColor=8b949e&fontAlignY=55" width="100%"/>
 
-**Built for learning. Use with your brain, not instead of it.**
+<br/>
 
 <img src="https://img.shields.io/badge/Made%20with-Python-3776ab?style=flat-square&logo=python&logoColor=white"/>
 <img src="https://img.shields.io/badge/Powered%20by-OpenRouter-7c3aed?style=flat-square"/>
 <img src="https://img.shields.io/badge/GitHub-GraphQL%20API%20v4-0969da?style=flat-square&logo=github"/>
+<img src="https://img.shields.io/badge/Maintained%20by-itxashancode-58a6ff?style=flat-square"/>
+
+<br/><br/>
+
+**If this helped you learn something, drop a ⭐**
 
 </div>
