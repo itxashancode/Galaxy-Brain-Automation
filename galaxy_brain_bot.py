@@ -8,7 +8,7 @@ import argparse
 import re
 import hashlib
 import threading
-from collections import defaultdict, deque
+from collections import defaultdict, deque, OrderedDict
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Set, Tuple
 import base64
@@ -44,6 +44,9 @@ logger = logging.getLogger("galaxy_brain")
 # ─────────────────────────────────────────────────────────────────────────────
 
 MAX_COMMENT_CHARS = 65_536
+BODY_TRUNCATE_CHARS = int(os.getenv("BODY_TRUNCATE_CHARS", "2500"))
+REPO_COOLDOWN_MINUTES = int(os.getenv("REPO_COOLDOWN_MINUTES", "60"))
+STALENESS_DAYS = int(os.getenv("STALENESS_DAYS", "180"))  # skip questions older than this
 
 def _require_env_int(key: str) -> int:
     val = os.getenv(key, "").strip()
@@ -83,9 +86,9 @@ try:
     PAGE_DELAY                     = _require_env_float("PAGE_FETCH_DELAY")
     MODEL_ATTEMPT_DELAY            = _require_env_float("MODEL_ATTEMPT_DELAY")
     RECENT_HOURS                   = _require_env_int("RECENT_HOURS")
-    CACHE_TTL_SECONDS              = _require_env_int("CACHE_TTL_SECONDS") if os.getenv("CACHE_TTL_SECONDS") else 300
-    CIRCUIT_BREAKER_THRESHOLD      = _require_env_int("CIRCUIT_BREAKER_THRESHOLD") if os.getenv("CIRCUIT_BREAKER_THRESHOLD") else 5
-    CIRCUIT_BREAKER_TIMEOUT        = _require_env_int("CIRCUIT_BREAKER_TIMEOUT") if os.getenv("CIRCUIT_BREAKER_TIMEOUT") else 120
+    CACHE_TTL_SECONDS              = int(os.getenv("CACHE_TTL_SECONDS", "300"))
+    CIRCUIT_BREAKER_THRESHOLD      = int(os.getenv("CIRCUIT_BREAKER_THRESHOLD", "5"))
+    CIRCUIT_BREAKER_TIMEOUT        = int(os.getenv("CIRCUIT_BREAKER_TIMEOUT", "120"))
     HEALTH_CHECK_PORT              = int(os.getenv("HEALTH_CHECK_PORT", "0"))
 
     # Multi-modal / link fetching — required from .env
@@ -329,7 +332,6 @@ class RequestDeduplicator:
     _MAX_SIZE = 10_000
 
     def __init__(self):
-        from collections import OrderedDict
         self._seen: "OrderedDict[str, None]" = OrderedDict()
 
     def fingerprint(self, *parts) -> str:
@@ -347,6 +349,92 @@ class RequestDeduplicator:
 
 
 deduplicator = RequestDeduplicator()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Per-repo cooldown tracker
+# ─────────────────────────────────────────────────────────────────────────────
+
+class RepoCooldownTracker:
+    """Prevents posting to the same repo too frequently within a session."""
+
+    def __init__(self, cooldown_minutes: int = REPO_COOLDOWN_MINUTES):
+        self._last_posted: Dict[str, float] = {}
+        self._cooldown = cooldown_minutes * 60
+        self._lock = threading.Lock()
+
+    def is_cooled_down(self, repo_key: str) -> bool:
+        with self._lock:
+            last = self._last_posted.get(repo_key)
+            if last is None:
+                return True
+            return (time.time() - last) >= self._cooldown
+
+    def record_post(self, repo_key: str):
+        with self._lock:
+            self._last_posted[repo_key] = time.time()
+
+    def seconds_remaining(self, repo_key: str) -> int:
+        with self._lock:
+            last = self._last_posted.get(repo_key)
+            if last is None:
+                return 0
+            remaining = self._cooldown - (time.time() - last)
+            return max(0, int(remaining))
+
+
+repo_cooldown = RepoCooldownTracker()
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Answer uniqueness: fingerprint past answers to avoid repetitive posts
+# ─────────────────────────────────────────────────────────────────────────────
+
+class AnswerUniquenessChecker:
+    """
+    Stores 6-gram shingle fingerprints of past answers this session.
+    Rejects a new answer if it overlaps too much with any prior answer.
+    """
+    _MAX_SHINGLES = 50_000
+    _OVERLAP_THRESHOLD = 0.35  # reject if Jaccard similarity >= this
+
+    def __init__(self):
+        self._shingle_sets: List[Set[str]] = []
+
+    @staticmethod
+    def _shingles(text: str, k: int = 6) -> Set[str]:
+        words = re.sub(r"[^a-z0-9\s]", "", text.lower()).split()
+        return {" ".join(words[i:i+k]) for i in range(len(words) - k + 1)} if len(words) >= k else set(words)
+
+    def is_unique(self, answer: str) -> Tuple[bool, float]:
+        """Returns (is_unique, max_similarity_seen)."""
+        new_sh = self._shingles(answer)
+        if not new_sh:
+            return True, 0.0
+        max_sim = 0.0
+        for past_sh in self._shingle_sets:
+            if not past_sh:
+                continue
+            intersection = len(new_sh & past_sh)
+            union = len(new_sh | past_sh)
+            sim = intersection / union if union else 0.0
+            if sim > max_sim:
+                max_sim = sim
+            if sim >= self._OVERLAP_THRESHOLD:
+                return False, sim
+        return True, max_sim
+
+    def register(self, answer: str):
+        sh = self._shingles(answer)
+        self._shingle_sets.append(sh)
+        # Trim oldest entries if we're accumulating too many shingles
+        total = sum(len(s) for s in self._shingle_sets)
+        while total > self._MAX_SHINGLES and self._shingle_sets:
+            removed = self._shingle_sets.pop(0)
+            total -= len(removed)
+
+
+answer_uniqueness = AnswerUniquenessChecker()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -434,6 +522,17 @@ def is_answerable(discussion: Dict) -> Tuple[bool, str]:
         return False, "body too short"
     if discussion.get("closed"):
         return False, "closed"
+
+    # Staleness check — skip questions that have gone cold
+    created_at = discussion.get("createdAt") or discussion.get("updatedAt")
+    if created_at:
+        try:
+            created_dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+            age_days = (datetime.now(timezone.utc) - created_dt).days
+            if age_days > STALENESS_DAYS:
+                return False, f"stale ({age_days}d old, limit {STALENESS_DAYS}d)"
+        except Exception:
+            pass
 
     combined = title + " " + body
 
@@ -1521,8 +1620,8 @@ Reference what you see directly (e.g. "your error shows X" or "that config line 
 
     return f"""\
 You are a senior software engineer — 10+ years of open source, backend, DevOps, and GitHub. \
-You're answering a GitHub Discussions Q&A post. Write exactly like a senior dev would in a Slack DM: \
-direct, specific, no fluff. {context_line}
+You have personally hit this kind of problem before. Write exactly like you'd respond to a \
+colleague on Slack: direct, specific, opinionated. {context_line}
 
 {coc_section}
 
@@ -1538,34 +1637,41 @@ OUTPUT RULES — READ THESE CAREFULLY:
 6. Do NOT wrap the answer in quotes. Output it raw.
 7. If you feel the urge to write an intro sentence — delete it and start with the second sentence.
 
-VOICE:
-- Use "I" naturally: "I'd check X", "I ran into this", "I usually do Y"
-- Short, punchy sentences. Save longer ones for actual explanations.
-- Name the exact thing: command, flag, file path, config key, function name, line number
-- Max 150 words. Cut anything that doesn't help them fix their problem.
-- Stop when you're done. No sign-offs.
+PERSONA — YOU ARE A REAL PERSON:
+- You've personally hit this kind of problem before. Reference that when it's natural.
+- "I ran into this same thing last year", "I'd check X first", "I usually do Y"
+- Have a take. Don't just list options — pick one and say why.
+- If you disagree with the existing comments, say so and explain why.
+- Acknowledge when you're not 100% sure: "not certain, but..." then still commit to an answer.
+
+STYLE — VARY YOUR SENTENCE RHYTHM:
+- Mix short punchy sentences with longer explanations. Not every sentence the same length.
+- Name the exact thing: command, flag, file path, config key, function name, line number.
 - No bullets unless it's a numbered step sequence. No headers. No bold.
-- If you're not 100% sure, say so — "not certain, but..." — then still commit to an answer.
+- Aim for 80–150 words. Stop when you're done. No sign-offs.
+- Code snippets are fine if they're the clearest way to explain something.
 
-WHAT GETS ANSWERS ACCEPTED:
-- Solves the actual problem, not a rephrased version of it
-- Specific enough to act on immediately
-- Sounds like someone who has done this before, not someone googling it
-- Adds value over the existing comments
-
-WORDS AND PHRASES THAT WILL GET THIS FLAGGED AS AI (never use):
+WORDS AND PHRASES THAT WILL GET THIS FLAGGED AS AI — NEVER USE:
 "It's worth noting", "It's important to", "In order to", "This serves as",
 "functions as", "leverage", "utilize", "enhance", "seamlessly", "robustly",
 "comprehensively", "as an AI", "I hope that helps", "feel free to",
 "don't hesitate", "does that make sense", "Let's craft", "Let me think",
+"straightforward", "simply put", "to be fair", "the key takeaway",
+"pro tip", "heads up", "with that said", "that being said", "of course",
 "The answer is:", "To answer your question", "We need to", "The first word",
 starting with a quote character, wrapping the answer in quotes.
+
+WHAT GETS ANSWERS MARKED AS ACCEPTED:
+- Solves the actual problem, not a rephrased version of it
+- Specific enough to act on immediately
+- Sounds like someone who has done this before, not someone googling it
+- Takes a position instead of listing every possible option
 
 ---
 Question title: {title}
 
 Question body:
-{body[:2500]}
+{body[:BODY_TRUNCATE_CHARS]}
 ---
 
 Reply (senior dev, plain text, no opener, no labels, just the answer):"""
@@ -1574,6 +1680,18 @@ Reply (senior dev, plain text, no opener, no labels, just the answer):"""
 # ─────────────────────────────────────────────────────────────────────────────
 # Post-processor — IMPROVED
 # ─────────────────────────────────────────────────────────────────────────────
+
+_REASONING_SIGNALS = re.compile(
+    r"\b(we need to|the instruction|so the first word|let me think|"
+    r"we must|we should|we have to|so we say|so i should|so i will|"
+    r"the question asks|so my answer|now i need|first word must|"
+    r"must be the answer|need to produce|need to answer|"
+    r"start with something|provide the answer|the answer is:|"
+    r"let'?s craft|let'?s write the|thus answer|"
+    r"under \d+ words|i will answer|i will write|i'll write|"
+    r"the reply should|my reply is|here is the answer)\b",
+    re.IGNORECASE,
+)
 
 def post_process_answer(answer: str) -> str:
     """Strip AI artifacts, reasoning bleed, labels, and filler from the generated answer."""
@@ -1605,23 +1723,11 @@ def post_process_answer(answer: str) -> str:
     ).strip()
 
     # ── 5. Detect and remove reasoning paragraphs ─────────────────────────────
-    _reasoning_signals = re.compile(
-        r"\b(we need to|the instruction|so the first word|let me think|"
-        r"we must|we should|we have to|so we say|so i should|so i will|"
-        r"the question asks|so my answer|now i need|first word must|"
-        r"must be the answer|need to produce|need to answer|"
-        r"start with something|provide the answer|the answer is:|"
-        r"let'?s craft|let'?s write the|thus answer|"
-        r"under \d+ words|i will answer|i will write|i'll write|"
-        r"the reply should|my reply is|here is the answer)\b",
-        re.IGNORECASE,
-    )
-
     paragraphs = [p.strip() for p in re.split(r"\n{2,}", answer) if p.strip()]
     if len(paragraphs) > 1:
         first_real = 0
         for i, para in enumerate(paragraphs):
-            if _reasoning_signals.search(para):
+            if _REASONING_SIGNALS.search(para):
                 first_real = i + 1
             else:
                 break
@@ -1629,9 +1735,9 @@ def post_process_answer(answer: str) -> str:
             answer = "\n\n".join(paragraphs[first_real:])
 
     # ── 6. Sentence-level reasoning cleanup (single-block monologue) ──────────
-    if _reasoning_signals.search(answer):
+    if _REASONING_SIGNALS.search(answer):
         sentences = re.split(r"(?<=[.!?])\s+", answer)
-        clean = [s for s in sentences if not _reasoning_signals.search(s) and len(s) > 20]
+        clean = [s for s in sentences if not _REASONING_SIGNALS.search(s) and len(s) > 20]
         if clean:
             answer = " ".join(clean)
 
@@ -1704,6 +1810,34 @@ def post_process_answer(answer: str) -> str:
         (r"\bIt is (worth|important) to note that\b", ""),
         (r"\btailored\b", "custom"),
         (r"\bpowered by\b", "using"),
+        # 2025-era AI tells
+        (r"\bto be fair,?\s*", ""),
+        (r"\bsimply put,?\s*", ""),
+        (r"\bin practice,?\s*", ""),
+        (r"\bstraightforward(ly)?\b", r"simple\1" if False else "simple"),
+        (r"\bstraightforward\b", "simple"),
+        (r"\bstraightforwardly\b", "simply"),
+        (r"\bthink of it as\b", "it's like"),
+        (r"\bthe good news is,?\s*", ""),
+        (r"\bthe bad news is,?\s*", ""),
+        (r"\bworth (exploring|considering|noting)\b", ""),
+        (r"\bit'?s also worth\b[^.]*\.\s*", ""),
+        (r"\bright\?\s*", ""),
+        (r"\bof course,?\s*", ""),
+        (r"\bneedless to say,?\s*", ""),
+        (r"\bwith that said,?\s*", ""),
+        (r"\ball that said,?\s*", ""),
+        (r"\bthat being said,?\s*", ""),
+        (r"\bpro tip:?\s*", ""),
+        (r"\bquick note:?\s*", ""),
+        (r"\bheads up:?\s*", ""),
+        (r"\bin essence,?\s*", ""),
+        (r"\bput simply,?\s*", ""),
+        (r"\blong story short,?\s*", ""),
+        (r"\bthe key (here|takeaway) is\b", ""),
+        (r"\boptimal(ly)?\b", r"best\1" if False else "best"),
+        (r"\boptimal\b", "best"),
+        (r"\boptimally\b", "best"),
     ]
     for pattern, replacement in inline_replacements:
         answer = re.sub(pattern, replacement, answer, flags=re.IGNORECASE)
@@ -1716,9 +1850,6 @@ def post_process_answer(answer: str) -> str:
         answer = answer[1:].lstrip()
     if answer and answer[-1] in ('"', "'", "\u201d", "\u2019"):
         answer = answer[:-1].rstrip()
-
-    if answer and answer[-1] not in ".!?":
-        answer += "."
 
     return answer
 
@@ -2102,6 +2233,14 @@ class GalaxyBrainBot:
             if self.stats.has_answered(d["id"]):
                 continue
 
+            # Per-repo cooldown check
+            repo_key = f"{owner}/{repo}"
+            if not repo_cooldown.is_cooled_down(repo_key):
+                secs = repo_cooldown.seconds_remaining(repo_key)
+                console.print(f"[dim]  Skipping #{d['number']}: repo on cooldown ({secs}s remaining)[/dim]")
+                skipped_count += 1
+                continue
+
             ok, reason = is_answerable(d)
             if not ok:
                 console.print(f"[dim]  Skipping #{d['number']}: {reason}[/dim]")
@@ -2140,6 +2279,14 @@ class GalaxyBrainBot:
                 skipped_count += 1
                 continue
 
+            # Answer uniqueness check — reject if too similar to a past answer this session
+            unique, sim = answer_uniqueness.is_unique(answer)
+            if not unique:
+                console.print(f"[yellow]Answer too similar to a past answer (similarity={sim:.2f}) — skipping[/yellow]")
+                logger.info(f"Uniqueness rejected: similarity={sim:.2f} for #{d['number']}")
+                skipped_count += 1
+                continue
+
             console.print("\n[bold cyan]Generated Answer:[/bold cyan]")
             console.print(Panel(answer, border_style="blue", title=f"Answer ({len(answer)} chars)"))
 
@@ -2153,6 +2300,8 @@ class GalaxyBrainBot:
                         title=d["title"], url=url, answer_preview=answer,
                         repo_owner=owner, repo_name=repo,
                     )
+                    answer_uniqueness.register(answer)
+                    repo_cooldown.record_post(repo_key)
                     answered_count += 1
                     console.print(f"[green]Posted ({answered_count}/{self.max_answers}): {url}[/green]")
                     logger.info(f"Posted: repo={owner}/{repo} #{d['number']} url={url}")
@@ -2254,6 +2403,8 @@ class GalaxyBrainBot:
         console.print(f"  Models              : {len(MODELS)}")
         console.print(f"  Cache TTL           : {CACHE_TTL_SECONDS}s")
         console.print(f"  Circuit breakers    : ON (threshold={CIRCUIT_BREAKER_THRESHOLD})")
+        console.print(f"  Repo cooldown       : {REPO_COOLDOWN_MINUTES}min")
+        console.print(f"  Staleness limit     : {STALENESS_DAYS}d")
         console.print(f"  Health server       : {'ON :' + str(HEALTH_CHECK_PORT) if HEALTH_CHECK_PORT else 'OFF'}")
 
         targets  = self._build_target_list()
