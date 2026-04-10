@@ -43,38 +43,76 @@ logger = logging.getLogger("galaxy_brain")
 # Constants / env-overridable settings
 # ─────────────────────────────────────────────────────────────────────────────
 
-MAX_COMMENT_CHARS              = 65_536
-ANSWER_MIN_CHARS               = int(os.getenv("ANSWER_MIN_CHARS", "120"))
-ANSWER_MAX_CHARS               = int(os.getenv("ANSWER_MAX_CHARS", "900"))
-RATE_LIMIT_RETRY_AFTER_DEFAULT = int(os.getenv("RATE_LIMIT_RETRY_AFTER", "60"))
-RATE_LIMIT_ROTATE_AFTER        = int(os.getenv("RATE_LIMIT_ROTATE_AFTER", "30"))
-PAGE_DELAY                     = float(os.getenv("PAGE_FETCH_DELAY", "0.5"))
-MODEL_ATTEMPT_DELAY            = float(os.getenv("MODEL_ATTEMPT_DELAY", "0.5"))
-RECENT_HOURS                   = int(os.getenv("RECENT_HOURS", "24"))
-CACHE_TTL_SECONDS              = int(os.getenv("CACHE_TTL_SECONDS", "300"))
-CIRCUIT_BREAKER_THRESHOLD      = int(os.getenv("CIRCUIT_BREAKER_THRESHOLD", "5"))
-CIRCUIT_BREAKER_TIMEOUT        = int(os.getenv("CIRCUIT_BREAKER_TIMEOUT", "120"))
-HEALTH_CHECK_PORT              = int(os.getenv("HEALTH_CHECK_PORT", "0"))  # 0 = disabled
+MAX_COMMENT_CHARS = 65_536
 
-# Multi-modal / link fetching
-ENABLE_IMAGE_ANALYSIS = os.getenv("ENABLE_IMAGE_ANALYSIS", "true").lower() == "true"
-ENABLE_LINK_FETCH     = os.getenv("ENABLE_LINK_FETCH",     "true").lower() == "true"
-LINK_FETCH_TIMEOUT    = int(os.getenv("LINK_FETCH_TIMEOUT", "8"))
-LINK_FETCH_MAX_CHARS  = int(os.getenv("LINK_FETCH_MAX_CHARS", "3000"))
-IMAGE_MAX_BYTES       = int(os.getenv("IMAGE_MAX_BYTES", str(4 * 1024 * 1024)))  # 4 MB
-MAX_IMAGES_PER_POST   = int(os.getenv("MAX_IMAGES_PER_POST", "3"))
-MAX_LINKS_PER_POST    = int(os.getenv("MAX_LINKS_PER_POST", "3"))
+def _require_env_int(key: str) -> int:
+    val = os.getenv(key, "").strip()
+    if not val:
+        raise EnvironmentError(f"Required env var '{key}' is missing or empty in .env")
+    try:
+        return int(val)
+    except ValueError:
+        raise EnvironmentError(f"Env var '{key}' must be an integer, got: {val!r}")
+
+def _require_env_float(key: str) -> float:
+    val = os.getenv(key, "").strip()
+    if not val:
+        raise EnvironmentError(f"Required env var '{key}' is missing or empty in .env")
+    try:
+        return float(val)
+    except ValueError:
+        raise EnvironmentError(f"Env var '{key}' must be a number, got: {val!r}")
+
+def _require_env_bool(key: str) -> bool:
+    val = os.getenv(key, "").strip()
+    if not val:
+        raise EnvironmentError(f"Required env var '{key}' is missing or empty in .env")
+    return val.lower() == "true"
+
+def _require_env_str(key: str) -> str:
+    val = os.getenv(key, "").strip()
+    if not val:
+        raise EnvironmentError(f"Required env var '{key}' is missing or empty in .env")
+    return val
+
+try:
+    ANSWER_MIN_CHARS               = _require_env_int("ANSWER_MIN_CHARS")
+    ANSWER_MAX_CHARS               = _require_env_int("ANSWER_MAX_CHARS")
+    RATE_LIMIT_RETRY_AFTER_DEFAULT = _require_env_int("RATE_LIMIT_RETRY_AFTER")
+    RATE_LIMIT_ROTATE_AFTER        = _require_env_int("RATE_LIMIT_ROTATE_AFTER")
+    PAGE_DELAY                     = _require_env_float("PAGE_FETCH_DELAY")
+    MODEL_ATTEMPT_DELAY            = _require_env_float("MODEL_ATTEMPT_DELAY")
+    RECENT_HOURS                   = _require_env_int("RECENT_HOURS")
+    CACHE_TTL_SECONDS              = _require_env_int("CACHE_TTL_SECONDS") if os.getenv("CACHE_TTL_SECONDS") else 300
+    CIRCUIT_BREAKER_THRESHOLD      = _require_env_int("CIRCUIT_BREAKER_THRESHOLD") if os.getenv("CIRCUIT_BREAKER_THRESHOLD") else 5
+    CIRCUIT_BREAKER_TIMEOUT        = _require_env_int("CIRCUIT_BREAKER_TIMEOUT") if os.getenv("CIRCUIT_BREAKER_TIMEOUT") else 120
+    HEALTH_CHECK_PORT              = int(os.getenv("HEALTH_CHECK_PORT", "0"))
+
+    # Multi-modal / link fetching — required from .env
+    ENABLE_IMAGE_ANALYSIS = _require_env_bool("ENABLE_IMAGE_ANALYSIS")
+    ENABLE_LINK_FETCH     = _require_env_bool("ENABLE_LINK_FETCH")
+    LINK_FETCH_TIMEOUT    = _require_env_int("LINK_FETCH_TIMEOUT")
+    LINK_FETCH_MAX_CHARS  = _require_env_int("LINK_FETCH_MAX_CHARS")
+    IMAGE_MAX_BYTES       = _require_env_int("IMAGE_MAX_BYTES")
+    MAX_IMAGES_PER_POST   = _require_env_int("MAX_IMAGES_PER_POST")
+    MAX_LINKS_PER_POST    = _require_env_int("MAX_LINKS_PER_POST")
+
+    # Auto-discovery settings — required from .env
+    _discovery_raw = _require_env_str("DISCOVERY_TOPICS")
+    DISCOVERY_TOPICS    = [t.strip() for t in _discovery_raw.split(",") if t.strip()]
+    DISCOVERY_MIN_STARS = _require_env_int("DISCOVERY_MIN_STARS")
+    DISCOVERY_MAX_REPOS = _require_env_int("DISCOVERY_MAX_REPOS")
+
+except EnvironmentError as _env_err:
+    print(f"[ERROR] Configuration error: {_env_err}")
+    print("Please ensure all required variables are set in your .env file.")
+    sys.exit(1)
 
 # Models that support vision (checked against model name substring)
 _VISION_MODEL_HINTS = [
     "gpt-4o", "gpt-4-vision", "claude", "gemini", "llava", "pixtral",
     "qwen-vl", "qwen2-vl", "internvl", "phi-3-vision", "mistral-pixtral",
 ]
-
-# Auto-discovery settings
-DISCOVERY_TOPICS    = [t.strip() for t in os.getenv("DISCOVERY_TOPICS", "open-source,programming,github,python,javascript,developer").split(",") if t.strip()]
-DISCOVERY_MIN_STARS = int(os.getenv("DISCOVERY_MIN_STARS", "5"))
-DISCOVERY_MAX_REPOS = int(os.getenv("DISCOVERY_MAX_REPOS", "50"))
 
 _DEFAULT_MODELS = [
     "qwen/qwen3.6-plus:free",
@@ -148,8 +186,10 @@ class InMemoryCache:
     def get(self, key: str):
         with self._lock:
             entry = self._store.get(key)
-            if entry and (time.time() - entry[0]) < self._ttl:
-                return entry[1]
+            if entry:
+                if (time.time() - entry[0]) < self._ttl:
+                    return entry[1]
+                del self._store[key]
             return None
 
     def set(self, key: str, value):
@@ -159,6 +199,10 @@ class InMemoryCache:
     def invalidate(self, key: str):
         with self._lock:
             self._store.pop(key, None)
+
+    def clear(self):
+        with self._lock:
+            self._store.clear()
 
     def stats(self) -> Dict:
         with self._lock:
@@ -191,36 +235,41 @@ class CircuitBreaker:
         self.state     = self.CLOSED
         self.failures  = 0
         self.opened_at: Optional[float] = None
+        self._lock     = threading.Lock()
 
     def allow(self) -> bool:
-        if self.state == self.CLOSED:
-            return True
-        if self.state == self.OPEN:
-            if time.time() - self.opened_at > self.timeout:
-                self.state = self.HALF
-                logger.info(f"CircuitBreaker [{self.name}] -> half-open (probe)")
+        with self._lock:
+            if self.state == self.CLOSED:
                 return True
-            return False
-        return True  # HALF_OPEN — allow the probe
+            if self.state == self.OPEN:
+                if time.time() - self.opened_at > self.timeout:
+                    self.state = self.HALF
+                    logger.info(f"CircuitBreaker [{self.name}] -> half-open (probe)")
+                    return True
+                return False
+            return True  # HALF_OPEN — allow the probe
 
     def record_success(self):
-        if self.state != self.CLOSED:
-            logger.info(f"CircuitBreaker [{self.name}] -> closed")
-        self.state     = self.CLOSED
-        self.failures  = 0
-        self.opened_at = None
+        with self._lock:
+            if self.state != self.CLOSED:
+                logger.info(f"CircuitBreaker [{self.name}] -> closed")
+            self.state     = self.CLOSED
+            self.failures  = 0
+            self.opened_at = None
 
     def record_failure(self):
-        self.failures += 1
-        if self.failures >= self.threshold:
-            if self.state != self.OPEN:
-                logger.warning(f"CircuitBreaker [{self.name}] -> open after {self.failures} failures")
-                console.print(f"[red]Circuit breaker OPEN for {self.name} — pausing requests[/red]")
-            self.state     = self.OPEN
-            self.opened_at = time.time()
+        with self._lock:
+            self.failures += 1
+            if self.failures >= self.threshold:
+                if self.state != self.OPEN:
+                    logger.warning(f"CircuitBreaker [{self.name}] -> open after {self.failures} failures")
+                    console.print(f"[red]Circuit breaker OPEN for {self.name} — pausing requests[/red]")
+                self.state     = self.OPEN
+                self.opened_at = time.time()
 
     def status(self) -> str:
-        return self.state
+        with self._lock:
+            return self.state
 
 
 _cb_github     = CircuitBreaker("github_graphql")
@@ -246,12 +295,14 @@ class AdaptiveRateLimiter:
             now = time.time()
             while self._calls and now - self._calls[0] > self.window_size:
                 self._calls.popleft()
+            sleep_for = 0.0
             if len(self._calls) >= self.max_calls:
                 oldest    = self._calls[0]
                 sleep_for = self.window_size - (now - oldest) + 0.1
-                if sleep_for > 0:
-                    logger.debug(f"RateLimiter [{self.name}] sleeping {sleep_for:.1f}s")
-                    time.sleep(sleep_for)
+        if sleep_for > 0:
+            logger.debug(f"RateLimiter [{self.name}] sleeping {sleep_for:.1f}s")
+            time.sleep(sleep_for)
+        with self._lock:
             self._calls.append(time.time())
 
     def backoff(self):
@@ -275,8 +326,11 @@ _rl_openrouter = AdaptiveRateLimiter("openrouter", max_calls=20, window_size=60)
 
 class RequestDeduplicator:
     """Prevents identical API calls (e.g. posting the same answer twice)."""
+    _MAX_SIZE = 10_000
+
     def __init__(self):
-        self._seen: Set[str] = set()
+        from collections import OrderedDict
+        self._seen: "OrderedDict[str, None]" = OrderedDict()
 
     def fingerprint(self, *parts) -> str:
         raw = "|".join(str(p) for p in parts)
@@ -286,7 +340,9 @@ class RequestDeduplicator:
         fp = self.fingerprint(*parts)
         if fp in self._seen:
             return True
-        self._seen.add(fp)
+        self._seen[fp] = None
+        while len(self._seen) > self._MAX_SIZE:
+            self._seen.popitem(last=False)
         return False
 
 
@@ -349,6 +405,26 @@ model_tracker = ModelPerformanceTracker(MODELS)
 # Quality gate
 # ─────────────────────────────────────────────────────────────────────────────
 
+_ANNOUNCEMENT_PATTERNS = re.compile(
+    r"(we'?re (happy|excited|pleased|proud) to (announce|introduce|release|share)|"
+    r"releasing v\d|"
+    r"introducing\s+v?\d|"
+    r"changelog|"
+    r"release notes|"
+    r"new release|"
+    r"announcing\s+|"
+    r"version \d+\.\d+)",
+    re.IGNORECASE,
+)
+
+_ERROR_PATTERNS = re.compile(
+    r"(traceback|error:|exception:|stack trace|fatal:|stderr|"
+    r"undefined|null pointer|segfault|exit code|failed to|"
+    r"cannot|can't|won't start|doesn't work|not working|broken)",
+    re.IGNORECASE,
+)
+
+
 def is_answerable(discussion: Dict) -> Tuple[bool, str]:
     title = (discussion.get("title") or "").strip()
     body  = (discussion.get("body")  or "").strip()
@@ -358,8 +434,25 @@ def is_answerable(discussion: Dict) -> Tuple[bool, str]:
         return False, "body too short"
     if discussion.get("closed"):
         return False, "closed"
-    if "?" not in title and "?" not in body and "```" not in body and "`" not in body:
-        return False, "no clear question"
+
+    combined = title + " " + body
+
+    if _ANNOUNCEMENT_PATTERNS.search(combined):
+        return False, "announcement/release post"
+
+    score = 0
+    if "?" in combined:
+        score += 2
+    if _ERROR_PATTERNS.search(combined):
+        score += 2
+    if "```" in body or "`" in body:
+        score += 1
+    if len(body) < 500 and "?" in combined:
+        score += 1
+
+    if score == 0:
+        return False, "no clear question signal"
+
     return True, ""
 
 
@@ -504,33 +597,45 @@ class GitHubDiscussionsAPI:
             return None
 
         _rl_github.wait_if_needed()
-        try:
-            r = requests.post(
-                self.api_url,
-                headers=self.headers,
-                json={"query": query, "variables": variables or {}},
-                timeout=30,
-            )
-            if r.status_code == 200:
-                result = r.json()
-                if "errors" in result:
-                    console.print(f"[red]GraphQL errors: {result['errors']}[/red]")
+        last_exc = None
+        for attempt in range(3):
+            try:
+                r = requests.post(
+                    self.api_url,
+                    headers=self.headers,
+                    json={"query": query, "variables": variables or {}},
+                    timeout=30,
+                )
+                if r.status_code == 200:
+                    result = r.json()
+                    if "errors" in result:
+                        console.print(f"[red]GraphQL errors: {result['errors']}[/red]")
+                        _cb_github.record_failure()
+                        return None
+                    data = result.get("data")
+                    _cb_github.record_success()
+                    if cache_key and data:
+                        cache.set(cache_key, data)
+                    return data
+                elif r.status_code == 429:
+                    _rl_github.backoff()
                     _cb_github.record_failure()
                     return None
-                data = result.get("data")
-                _cb_github.record_success()
-                if cache_key and data:
-                    cache.set(cache_key, data)
-                return data
-            elif r.status_code == 429:
-                _rl_github.backoff()
+                else:
+                    console.print(f"[red]HTTP {r.status_code}: {r.text[:200]}[/red]")
+                    _cb_github.record_failure()
+                    return None
+            except (requests.ConnectionError, requests.Timeout) as e:
+                last_exc = e
+                wait = 2 ** attempt
+                logger.warning(f"GitHub network error (attempt {attempt+1}/3): {e} — retrying in {wait}s")
+                time.sleep(wait)
+            except Exception as e:
+                console.print(f"[red]Request error: {e}[/red]")
                 _cb_github.record_failure()
-            else:
-                console.print(f"[red]HTTP {r.status_code}: {r.text[:200]}[/red]")
-                _cb_github.record_failure()
-        except Exception as e:
-            console.print(f"[red]Request error: {e}[/red]")
-            _cb_github.record_failure()
+                return None
+        console.print(f"[red]GitHub network error after 3 attempts: {last_exc}[/red]")
+        _cb_github.record_failure()
         return None
 
     # ── Repo Discovery ─────────────────────────────────────────────────────────
@@ -648,7 +753,6 @@ class GitHubDiscussionsAPI:
                         headers=self.rest_headers, timeout=10,
                     )
                     if r.status_code == 200:
-                        import base64
                         content = r.json().get("content", "")
                         if content:
                             decoded = base64.b64decode(content).decode("utf-8", errors="ignore")
@@ -700,12 +804,16 @@ class GitHubDiscussionsAPI:
                     category_id = node["id"]
                     console.print(f"  [dim]{owner}/{repo}: Q&A category '{node['name']}'[/dim]")
                     break
+
         if not category_id:
             for node in nodes:
                 if node.get("isAnswerable"):
                     category_id = node["id"]
-                    console.print(f"  [dim]{owner}/{repo}: answerable category '{node['name']}'[/dim]")
+                    console.print(f"  [dim]{owner}/{repo}: answerable category '{node['name']}' (fallback)[/dim]")
                     break
+
+        if not category_id:
+            console.print(f"  [dim]{owner}/{repo}: no answerable categories — skipping[/dim]")
 
         self._category_cache[cache_key_tuple] = category_id
         cache.set(f"cat:{owner}/{repo}", category_id)
@@ -866,7 +974,7 @@ class KeyManager:
     def get_next_key(self) -> Optional[str]:
         if not self.openrouter_keys:
             return None
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
         for _ in range(len(self.openrouter_keys) * 2):
             key = self.openrouter_keys[self.current_key_index]
             self.current_key_index = (self.current_key_index + 1) % len(self.openrouter_keys)
@@ -875,11 +983,11 @@ class KeyManager:
                 self.key_stats[key]["rate_limited_until"] = None
                 self.key_stats[key]["last_used"] = now
                 return key
-        return min(self.openrouter_keys, key=lambda k: self.key_stats[k]["rate_limited_until"] or datetime.min)
+        return min(self.openrouter_keys, key=lambda k: self.key_stats[k]["rate_limited_until"] or datetime.min.replace(tzinfo=timezone.utc))
 
     def mark_rate_limited(self, key: str, retry_after: int = 60):
         if key in self.key_stats:
-            self.key_stats[key]["rate_limited_until"] = datetime.now() + timedelta(seconds=retry_after)
+            self.key_stats[key]["rate_limited_until"] = datetime.now(timezone.utc) + timedelta(seconds=retry_after)
             self.key_stats[key]["errors"] += 1
 
     def increment_usage(self, key: str):
@@ -894,10 +1002,11 @@ class KeyManager:
 class StatsTracker:
     def __init__(self, max_answers: int = 500):
         self.stats_file  = "galaxy_brain_stats.json"
-        self.backup_file = "galaxy_brain_stats_json.backup"
+        self.backup_file = "galaxy_brain_stats.json.backup"
         self.max_answers = max_answers
         self.answered_ids: Set[str] = set()
         self.dirty = False
+        self._backup_done_this_session = False
         self._cleanup_old_backups()
         self.stats = self._load()
 
@@ -912,6 +1021,8 @@ class StatsTracker:
             pass
 
     def _rolling_backup(self):
+        if self._backup_done_this_session:
+            return
         if not os.path.exists(self.stats_file):
             return
         try:
@@ -925,6 +1036,7 @@ class StatsTracker:
                     os.remove(old)
                 except Exception:
                     pass
+            self._backup_done_this_session = True
         except Exception:
             pass
 
@@ -1119,7 +1231,6 @@ def fetch_image_as_b64(url: str, session: Optional[requests.Session] = None) -> 
 # Multi-modal: link content fetcher
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Patterns for common developer-relevant link types
 _GITHUB_ISSUE_RE   = re.compile(r"https://github\.com/([^/]+)/([^/]+)/issues/(\d+)")
 _GITHUB_PR_RE      = re.compile(r"https://github\.com/([^/]+)/([^/]+)/pull/(\d+)")
 _GITHUB_FILE_RE    = re.compile(r"https://github\.com/([^/]+)/([^/]+)/blob/([^/]+)/(.+)")
@@ -1146,7 +1257,7 @@ def fetch_link_content(url: str, github_token: Optional[str] = None) -> Optional
     """
     Fetch the meaningful text content of a URL.
     Handles GitHub issues/PRs/files specially; generic HTML otherwise.
-    Returns a short plain-text summary (≤ LINK_FETCH_MAX_CHARS).
+    Returns a short plain-text summary (<= LINK_FETCH_MAX_CHARS).
     """
     if not ENABLE_LINK_FETCH:
         return None
@@ -1154,7 +1265,6 @@ def fetch_link_content(url: str, github_token: Optional[str] = None) -> Optional
         return None
 
     try:
-        # ── GitHub API fast paths ──────────────────────────────────────────
         headers_gh = {"Accept": "application/vnd.github.v3+json"}
         if github_token:
             headers_gh["Authorization"] = f"Bearer {github_token}"
@@ -1239,7 +1349,7 @@ def fetch_link_content(url: str, github_token: Optional[str] = None) -> Optional
                 vers = info.get("version", "")
                 return f"[PyPI: {pkg} v{vers}] {desc}"[:LINK_FETCH_MAX_CHARS]
 
-        # ── Generic HTML fallback ──────────────────────────────────────────
+        # Generic HTML fallback
         r = requests.get(
             url, timeout=LINK_FETCH_TIMEOUT,
             headers={"User-Agent": "Mozilla/5.0 (compatible; GalaxyBrainBot/1.0)"},
@@ -1257,7 +1367,7 @@ def fetch_link_content(url: str, github_token: Optional[str] = None) -> Optional
             size += len(chunk)
             if size > 40_000:
                 break
-        # Strip tags crudely
+        raw_text = re.sub(r"<(script|style|noscript)[^>]*>.*?</\1>", " ", raw_text, flags=re.IGNORECASE | re.DOTALL)
         text = re.sub(r"<[^>]+>", " ", raw_text)
         text = re.sub(r"\s+", " ", text).strip()
         return text[:LINK_FETCH_MAX_CHARS]
@@ -1271,7 +1381,7 @@ def fetch_link_content(url: str, github_token: Optional[str] = None) -> Optional
 # Multi-modal: extract URLs and images from discussion body
 # ─────────────────────────────────────────────────────────────────────────────
 
-_URL_RE      = re.compile(r"https?://[^\s\)\]\>\"\']+")
+_URL_RE      = re.compile(r"https?://[^\s\)\]\>\"\'>]+")
 _MD_IMAGE_RE = re.compile(r"!\[.*?\]\((https?://[^\)]+)\)")
 _HTML_IMG_RE = re.compile(r'<img[^>]+src=["\']?(https?://[^\s"\'>/]+[^\s"\'>;]*)', re.IGNORECASE)
 
@@ -1289,14 +1399,12 @@ def extract_urls_from_text(text: str) -> Tuple[List[str], List[str]]:
     link_urls: List[str]  = []
     seen_lnk: Set[str]    = set()
 
-    # Explicit markdown/html images first
     for url in _MD_IMAGE_RE.findall(text) + _HTML_IMG_RE.findall(text):
         url = url.rstrip(".,;:)")
         if url not in seen_img and len(image_urls) < MAX_IMAGES_PER_POST:
             image_urls.append(url)
             seen_img.add(url)
 
-    # All URLs
     for url in _URL_RE.findall(text):
         url = url.rstrip(".,;:)")
         ext = url.rsplit("?", 1)[0].rsplit(".", 1)[-1].lower()
@@ -1362,8 +1470,7 @@ def summarize_comments(comments: List[Dict]) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Prompt builder
-# Senior Dev / GitHub Analyst persona + humanizer patterns
+# Prompt builder — IMPROVED
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_answer_prompt(
@@ -1377,89 +1484,82 @@ def build_answer_prompt(
 ) -> str:
     coc_rules_extracted = extract_coc_rules(coc_text) if coc_text else ""
     if coc_rules_extracted:
-        coc_section = f"""This repo has a Code of Conduct. Key rules:
+        coc_section = f"""Community rules for this repo:
 {coc_rules_extracted}
-Stay within these. Rewrite anything that would violate them."""
+Stay within these. Don't self-promote, don't be preachy."""
     else:
-        coc_section = "Be direct and respectful. No self-promotion, no off-topic tangents."
+        coc_section = "Be direct. No self-promotion. No lectures."
 
     comment_summary = summarize_comments(existing_comments or [])
     if comment_summary:
-        comments_section = f"""Others have already commented:
+        comments_section = f"""What others have said so far:
 {comment_summary}
 
-Add something they haven't covered. Don't repeat the same points. If someone partially answered, build on it or point out what they missed."""
+Don't repeat them. Either build on what they said or correct what they got wrong."""
     else:
-        comments_section = "No one has answered yet."
+        comments_section = "No one has replied yet — you're first."
 
     context_line = f"Repo: {repo_context}" if repo_context else ""
 
-    # Multi-modal enrichment sections
     link_section = ""
     if link_contexts:
-        joined = "\n\n".join(f"[Linked content {i+1}]\n{ctx}" for i, ctx in enumerate(link_contexts))
+        joined = "\n\n".join(f"[Link {i+1}]\n{ctx}" for i, ctx in enumerate(link_contexts))
         link_section = f"""
-The question links to external content. Here's what those pages actually say:
+The question includes external links. Here's what they contain:
 {joined}
 
-Use this when it's directly relevant. Don't mention you fetched it — just work it in naturally."""
+Work this in naturally if it's relevant. Don't say you fetched it."""
 
     image_section = ""
     if image_descriptions:
         joined = "\n".join(f"- {desc}" for desc in image_descriptions)
         image_section = f"""
-The question includes images. Here's what they show:
+Images in the question:
 {joined}
 
-Reference the image content if it clarifies the problem (e.g. "looking at your screenshot, the issue is...")."""
+Reference what you see directly (e.g. "your error shows X" or "that config line is wrong")."""
 
     return f"""\
-You are a senior software engineer with 10+ years of experience in open source, web development, \
-DevOps, and GitHub tooling. You answer GitHub Discussions questions the way a real senior dev would \
-in a Slack thread: direct, specific, occasionally opinionated, never robotic. {context_line}
+You are a senior software engineer — 10+ years of open source, backend, DevOps, and GitHub. \
+You're answering a GitHub Discussions Q&A post. Write exactly like a senior dev would in a Slack DM: \
+direct, specific, no fluff. {context_line}
 
 {coc_section}
 
 {comments_section}
 {link_section}{image_section}
 
-WHO YOU ARE:
-You've seen this category of problem many times. You remember running into it yourself. You have opinions \
-about the right fix. You're not going to restate the docs — you're going to tell them what actually works.
+OUTPUT RULES — READ THESE CAREFULLY:
+1. Output ONLY the answer text. Nothing else. No preamble, no meta-commentary.
+2. Do NOT start with "Let's", "Here's", "Sure", "Great", or any opener phrase.
+3. Do NOT write "Answer:", "My answer:", "First word:", or any self-referential label.
+4. Do NOT narrate what you're about to do. Just do it.
+5. The very first character of your response must be the start of the actual answer.
+6. Do NOT wrap the answer in quotes. Output it raw.
+7. If you feel the urge to write an intro sentence — delete it and start with the second sentence.
 
-HOW TO WRITE THE ANSWER:
-- First word is the answer. Not "Great question", not "Sure!", not any opener at all.
-- Use "I" when it fits: "I'd check X first", "I've run into this", "I usually handle it with..."
-- Short sentences mostly. Longer ones only when you need to actually explain something.
-- Name the exact command, config key, file path, or API — not "check your settings."
-- Under 150 words. Every word earns its place.
-- Stop when you're done. No "hope that helps", no sign-offs.
-- No bullet points unless it's literally a numbered sequence of steps.
-- No headers, no bold, no em dashes.
-- If you're genuinely unsure, say "not 100% on this but..." then still commit to an answer.
-- If the question includes a screenshot or error image, describe what you see in it concretely.
+VOICE:
+- Use "I" naturally: "I'd check X", "I ran into this", "I usually do Y"
+- Short, punchy sentences. Save longer ones for actual explanations.
+- Name the exact thing: command, flag, file path, config key, function name, line number
+- Max 150 words. Cut anything that doesn't help them fix their problem.
+- Stop when you're done. No sign-offs.
+- No bullets unless it's a numbered step sequence. No headers. No bold.
+- If you're not 100% sure, say so — "not certain, but..." — then still commit to an answer.
 
-WHAT MAKES AN ANSWER GET ACCEPTED:
-- It solves the actual problem, not a paraphrase of it.
-- Specific enough that the person can act on it right now.
-- Sounds like someone who has done this, not someone who read about it.
-- Adds something the other comments didn't.
-- If they pasted a link, it's because the context matters — use it.
+WHAT GETS ANSWERS ACCEPTED:
+- Solves the actual problem, not a rephrased version of it
+- Specific enough to act on immediately
+- Sounds like someone who has done this before, not someone googling it
+- Adds value over the existing comments
 
-PATTERNS THAT MAKE ANSWERS SOUND AI-GENERATED (never use these):
-- "It's worth noting that..." / "It's important to mention..."
-- "In order to..." (say "To")
-- "This serves as" / "functions as" / "acts as" (say "is")
-- "Leverage" / "utilize" (say "use")
-- "Enhance" (say "improve")
-- "Seamlessly" / "robustly" / "comprehensively"
-- "As an AI..." or anything that breaks the persona
-- "I hope that helps!" or any variation
-- "Feel free to..." or "Don't hesitate to..."
-- Ending with a question like "Does that make sense?"
-- Lists of emojis, bold headers, "### Section" formatting
-- Starting with "Great question!" or any compliment
-- "Based on your image/screenshot" as an opener — just address the content
+WORDS AND PHRASES THAT WILL GET THIS FLAGGED AS AI (never use):
+"It's worth noting", "It's important to", "In order to", "This serves as",
+"functions as", "leverage", "utilize", "enhance", "seamlessly", "robustly",
+"comprehensively", "as an AI", "I hope that helps", "feel free to",
+"don't hesitate", "does that make sense", "Let's craft", "Let me think",
+"The answer is:", "To answer your question", "We need to", "The first word",
+starting with a quote character, wrapping the answer in quotes.
 
 ---
 Question title: {title}
@@ -1468,13 +1568,92 @@ Question body:
 {body[:2500]}
 ---
 
-Your answer (under 150 words, senior dev talking to a colleague):"""
+Reply (senior dev, plain text, no opener, no labels, just the answer):"""
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Post-processor — IMPROVED
+# ─────────────────────────────────────────────────────────────────────────────
 
 def post_process_answer(answer: str) -> str:
-    """Strip remaining AI-isms from the generated answer (humanizer pass)."""
+    """Strip AI artifacts, reasoning bleed, labels, and filler from the generated answer."""
 
-    # Trailing filler phrases
+    if not answer:
+        return answer
+
+    # ── 1. Strip explicit answer labels/markers ────────────────────────────────
+    # "Answer: ...", "My answer: ...", "Final answer: ...", "Here is my answer: ..."
+    answer = re.sub(
+        r"^(?:(?:final\s+)?answer|my answer|here(?:'s| is)(?: my)? answer|reply)\s*[:\-]\s*",
+        "", answer, flags=re.IGNORECASE,
+    ).strip()
+
+    # ── 2. Strip opening quotes (some models wrap the answer in "..." or '...') ──
+    # e.g. "The fix is to..." or 'Run pip install first.'
+    answer = re.sub(r'^["\'](.+)["\']$', r'\1', answer, flags=re.DOTALL).strip()
+
+    # ── 3. Strip "Let's craft:" / "Let's write:" preamble ─────────────────────
+    answer = re.sub(
+        r"^(?:let'?s\s+(?:craft|write|think|consider|look at|start|begin|answer)[^:\n]*[:.]?\s*)+",
+        "", answer, flags=re.IGNORECASE,
+    ).strip()
+
+    # ── 4. Strip "Thus answer:" / "So the answer is:" fragments ──────────────
+    answer = re.sub(
+        r"^(?:thus|so|therefore|hence)\s+(?:the\s+)?(?:answer|reply)\s*[:\-]\s*",
+        "", answer, flags=re.IGNORECASE,
+    ).strip()
+
+    # ── 5. Detect and remove reasoning paragraphs ─────────────────────────────
+    _reasoning_signals = re.compile(
+        r"\b(we need to|the instruction|so the first word|let me think|"
+        r"we must|we should|we have to|so we say|so i should|so i will|"
+        r"the question asks|so my answer|now i need|first word must|"
+        r"must be the answer|need to produce|need to answer|"
+        r"start with something|provide the answer|the answer is:|"
+        r"let'?s craft|let'?s write the|thus answer|"
+        r"under \d+ words|i will answer|i will write|i'll write|"
+        r"the reply should|my reply is|here is the answer)\b",
+        re.IGNORECASE,
+    )
+
+    paragraphs = [p.strip() for p in re.split(r"\n{2,}", answer) if p.strip()]
+    if len(paragraphs) > 1:
+        first_real = 0
+        for i, para in enumerate(paragraphs):
+            if _reasoning_signals.search(para):
+                first_real = i + 1
+            else:
+                break
+        if 0 < first_real < len(paragraphs):
+            answer = "\n\n".join(paragraphs[first_real:])
+
+    # ── 6. Sentence-level reasoning cleanup (single-block monologue) ──────────
+    if _reasoning_signals.search(answer):
+        sentences = re.split(r"(?<=[.!?])\s+", answer)
+        clean = [s for s in sentences if not _reasoning_signals.search(s) and len(s) > 20]
+        if clean:
+            answer = " ".join(clean)
+
+    # ── 7. Strip opener filler phrases ────────────────────────────────────────
+    opener_patterns = [
+        r"^Great question[.!]\s*",
+        r"^Thanks for (asking|your question|posting)[.!]\s*",
+        r"^Sure[,!]\s*",
+        r"^Of course[,!]\s*",
+        r"^Absolutely[,!]\s*",
+        r"^Certainly[,!]\s*",
+        r"^That'?s? (a )?(great|good|excellent) (point|question)[.!]\s*",
+        r"^You'?re (absolutely )?right[.!]\s*",
+        r"^To answer your question[,:]?\s*",
+        r"^(?:Here'?s?|This is) (?:my |the |a )?(?:answer|reply|response)[:.]\s*",
+        r"^The answer (?:is|to this is)[:.]\s*",
+    ]
+    for pattern in opener_patterns:
+        answer = re.sub(pattern, "", answer, flags=re.IGNORECASE)
+    answer = answer.strip()
+
+    # ── 8. Strip trailing filler ──────────────────────────────────────────────
     filler_endings = [
         r"\n*I hope (that )?this helps[.!]*\s*$",
         r"\n*Feel free to (ask|reach out|let me know)[^.]*[.!]*\s*$",
@@ -1493,24 +1672,9 @@ def post_process_answer(answer: str) -> str:
     for pattern in filler_endings:
         answer = re.sub(pattern, "", answer, flags=re.IGNORECASE).rstrip()
 
-    # Em/en dashes -> plain hyphen
-    answer = answer.replace("\u2014", " - ").replace("\u2013", " - ")
+    # ── 9. Inline AI-isms ─────────────────────────────────────────────────────
+    answer = answer.replace("\u2014", " - ").replace("\u2013", " - ")  # em/en dashes
 
-    # Opening AI filler
-    opener_patterns = [
-        r"^Great question[.!]\s*",
-        r"^Thanks for (asking|your question|posting)[.!]\s*",
-        r"^Sure[,!]\s*",
-        r"^Of course[,!]\s*",
-        r"^Absolutely[,!]\s*",
-        r"^Certainly[,!]\s*",
-        r"^That'?s? (a )?(great|good|excellent) (point|question)[.!]\s*",
-        r"^You'?re (absolutely )?right[.!]\s*",
-    ]
-    for pattern in opener_patterns:
-        answer = re.sub(pattern, "", answer, flags=re.IGNORECASE)
-
-    # Inline AI-isms (humanizer pattern list)
     inline_replacements = [
         (r"It'?s (worth noting|important to note|worth mentioning) that\s*", ""),
         (r"\bIn order to\b", "To"),
@@ -1520,12 +1684,12 @@ def post_process_answer(answer: str) -> str:
         (r"\bfunctions as a\b", "is a"),
         (r"\bstands as a\b", "is a"),
         (r"\bacts as a\b", "is a"),
-        (r"\bleverag(e|ing|es|ed)\b", "us\\1"),
-        (r"\butiliz(e|ing|es|ed)\b", "us\\1"),
-        (r"\benhance(s|d|ment)?\b", "improve\\1"),
-        (r"\bseamless(ly)?\b", "smooth\\1"),
+        (r"\bleverag(e|ing|es|ed)\b", r"us\1"),
+        (r"\butiliz(e|ing|es|ed)\b", r"us\1"),
+        (r"\benhance(s|d|ment)?\b", r"improve\1"),
+        (r"\bseamless(ly)?\b", r"smooth\1"),
         (r"\brobust\b", "solid"),
-        (r"\bcomprehensive(ly)?\b", "thorough\\1"),
+        (r"\bcomprehensive(ly)?\b", r"thorough\1"),
         (r"\bnuanced\b", "detailed"),
         (r"\bgroundbreaking\b", "significant"),
         (r"\bpivotal\b", "key"),
@@ -1544,14 +1708,49 @@ def post_process_answer(answer: str) -> str:
     for pattern, replacement in inline_replacements:
         answer = re.sub(pattern, replacement, answer, flags=re.IGNORECASE)
 
-    # Clean double spaces
+    # ── 10. Final cleanup ─────────────────────────────────────────────────────
     answer = re.sub(r"  +", " ", answer).strip()
 
-    # Ensure ends with punctuation
+    # Strip a leading quote from the very first character if it crept back in
+    if answer and answer[0] in ('"', "'", "\u201c", "\u2018"):
+        answer = answer[1:].lstrip()
+    if answer and answer[-1] in ('"', "'", "\u201d", "\u2019"):
+        answer = answer[:-1].rstrip()
+
     if answer and answer[-1] not in ".!?":
         answer += "."
 
     return answer
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Answer validator — catch responses that still smell like AI slop
+# ─────────────────────────────────────────────────────────────────────────────
+
+_SLOP_SIGNALS = re.compile(
+    r"^(let'?s |here'?s |here is |to answer |the answer is |my answer |thus |"
+    r"sure[,!] |of course |absolutely[,!] |certainly[,!] |great question)",
+    re.IGNORECASE,
+)
+
+_STILL_REASONING = re.compile(
+    r"\b(we need to (answer|produce|write)|the instruction says|"
+    r"first word must be|must be the answer|need to produce answer|"
+    r"so the first word|let me think|we must (not|add|answer)|"
+    r"let'?s craft|thus answer|under \d+ words)\b",
+    re.IGNORECASE,
+)
+
+
+def is_valid_answer(answer: str) -> Tuple[bool, str]:
+    """Returns (is_valid, rejection_reason)."""
+    if not answer or len(answer) < ANSWER_MIN_CHARS:
+        return False, f"too short ({len(answer)} chars)"
+    if _STILL_REASONING.search(answer[:400]):
+        return False, "reasoning bleed detected"
+    if _SLOP_SIGNALS.search(answer[:80]):
+        return False, "AI opener detected"
+    return True, ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1652,6 +1851,7 @@ class GalaxyBrainBot:
         console.print(f"[green]Bot ready — posting as: {self.github_username}[/green]")
         if self.auto_post:
             console.print("[yellow]AUTO_POST is ON[/yellow]")
+        self.verbose = False
 
     def _build_target_list(self) -> List[Tuple[str, str]]:
         hardcoded = _load_hardcoded_targets()
@@ -1686,7 +1886,6 @@ class GalaxyBrainBot:
         # ── Multi-modal enrichment ─────────────────────────────────────────
         image_urls, link_urls = extract_urls_from_text(body or "")
 
-        # Fetch link text (cached)
         link_contexts: List[str] = []
         if ENABLE_LINK_FETCH and link_urls:
             for url in link_urls:
@@ -1702,7 +1901,6 @@ class GalaxyBrainBot:
                     link_contexts.append(ctx)
                     console.print(f"  [dim]Fetched link: {url[:60]}[/dim]")
 
-        # Fetch images (b64) for vision-capable models
         fetched_images: List[Dict] = []
         if ENABLE_IMAGE_ANALYSIS and image_urls:
             for url in image_urls:
@@ -1718,24 +1916,26 @@ class GalaxyBrainBot:
                     fetched_images.append(img)
                     console.print(f"  [dim]Fetched image ({img['media_type']}): {url[:60]}[/dim]")
 
-        # Build the text prompt (images handled separately as message blocks)
         prompt = build_answer_prompt(
             title=title, body=body,
             existing_comments=existing_comments or [],
             coc_text=coc_text, repo_context=repo_context,
             link_contexts=link_contexts if link_contexts else None,
-            image_descriptions=None,  # We pass images as vision blocks, not text descriptions
+            image_descriptions=None,
         )
 
         if not _cb_openrouter.allow():
             logger.warning("OpenRouter circuit breaker OPEN — skipping generation")
             return None
 
-        tried_models: Set[str] = set()
-        max_retries  = max(len(self.key_manager.openrouter_keys) * len(MODELS), 10)
-        ordered      = model_tracker.sorted_models(MODELS)
+        if self.verbose:
+            console.print("\n[bold magenta]--- VERBOSE: Full Prompt ---[/bold magenta]")
+            console.print(prompt)
+            console.print("[bold magenta]--- END PROMPT ---[/bold magenta]\n")
 
-        for _ in range(max_retries):
+        max_key_rounds = max(len(self.key_manager.openrouter_keys), 1) * 2
+
+        for key_round in range(max_key_rounds):
             if shutdown.requested:
                 return None
 
@@ -1750,11 +1950,13 @@ class GalaxyBrainBot:
                 "X-Title":       "GitHub Community Helper",
             }
 
+            ordered      = model_tracker.sorted_models(MODELS)
+            tried_models: Set[str] = set()
+
             for model in ordered:
                 if model in tried_models or shutdown.requested:
                     continue
 
-                # Build message payload — vision blocks only for capable models
                 use_vision = fetched_images and _is_vision_model(model)
                 if use_vision:
                     content: object = [{"type": "text", "text": prompt}]
@@ -1778,7 +1980,7 @@ class GalaxyBrainBot:
                         json={
                             "model": model,
                             "messages": messages,
-                            "temperature": 0.65,
+                            "temperature": 0.7,
                             "max_tokens": 400,
                         },
                         timeout=45,
@@ -1793,18 +1995,29 @@ class GalaxyBrainBot:
                             tried_models.add(model)
                             continue
                         raw = choices[0].get("message", {}).get("content", "").strip()
+                        if self.verbose:
+                            console.print(f"\n[bold magenta]--- VERBOSE: Raw ({model}) ---[/bold magenta]")
+                            console.print(raw)
+                            console.print("[bold magenta]--- END RAW ---[/bold magenta]\n")
                         if not raw:
                             model_tracker.record(model, success=False, empty=True)
                             tried_models.add(model)
                             continue
+
                         answer = post_process_answer(raw)
-                        if len(answer) < ANSWER_MIN_CHARS:
-                            console.print(f"[yellow]{model}: too short ({len(answer)})[/yellow]")
+
+                        # Validate — reject if still bad
+                        valid, reason = is_valid_answer(answer)
+                        if not valid:
+                            console.print(f"[yellow]{model}: rejected — {reason}[/yellow]")
                             model_tracker.record(model, success=False)
                             tried_models.add(model)
                             continue
+
                         if len(answer) > ANSWER_MAX_CHARS:
-                            answer = answer[:ANSWER_MAX_CHARS].rsplit("\n", 1)[0]
+                            truncated = answer[:ANSWER_MAX_CHARS].rsplit("\n", 1)[0]
+                            answer = truncated if truncated else answer[:ANSWER_MAX_CHARS]
+
                         model_tracker.record(model, success=True, latency=latency)
                         _cb_openrouter.record_success()
                         _rl_openrouter.reset_backoff()
@@ -1826,9 +2039,8 @@ class GalaxyBrainBot:
                         _rl_openrouter.backoff()
                         _cb_openrouter.record_failure()
                     elif r.status_code == 400 and use_vision:
-                        # Model rejected vision payload — retry text-only
-                        logger.debug(f"{model}: 400 on vision payload, will retry text-only")
-                        fetched_images = []   # disable vision for remaining attempts
+                        logger.debug(f"{model}: 400 on vision payload, retrying text-only")
+                        fetched_images = []
                         model_tracker.record(model, success=False)
                         tried_models.add(model)
                     else:
@@ -1845,10 +2057,8 @@ class GalaxyBrainBot:
                     tried_models.add(model)
                 time.sleep(MODEL_ATTEMPT_DELAY)
 
-            if len(tried_models) >= len(MODELS):
-                self.key_manager.mark_rate_limited(api_key, RATE_LIMIT_ROTATE_AFTER)
-                tried_models.clear()
-                time.sleep(2)
+            self.key_manager.mark_rate_limited(api_key, RATE_LIMIT_ROTATE_AFTER)
+            time.sleep(2)
 
         console.print("[red]Max retries reached — couldn't generate answer[/red]")
         logger.warning(f"Failed to generate answer for: {title[:60]}")
@@ -1867,7 +2077,6 @@ class GalaxyBrainBot:
             for d in unseen:
                 all_discussions.append((owner, repo, d))
 
-        # Sort newest first (timezone-aware)
         def sort_key(item):
             _, _, d = item
             ts = d.get("createdAt", "")
@@ -2047,7 +2256,6 @@ class GalaxyBrainBot:
         console.print(f"  Circuit breakers    : ON (threshold={CIRCUIT_BREAKER_THRESHOLD})")
         console.print(f"  Health server       : {'ON :' + str(HEALTH_CHECK_PORT) if HEALTH_CHECK_PORT else 'OFF'}")
 
-        self.check_accepted()
         targets  = self._build_target_list()
         answered = self.find_and_answer(targets)
 
@@ -2076,10 +2284,13 @@ def main():
     parser = argparse.ArgumentParser(
         description="Galaxy Brain Badge Bot v6 — circuit breakers, adaptive rate limiting, smart model selection"
     )
-    parser.add_argument("--check",       action="store_true", help="Check for accepted answers only")
+    parser.add_argument("--check",       action="store_true",
+                        help="Check for accepted answers only (does NOT run the main bot loop)")
     parser.add_argument("--stats",       action="store_true", help="Display stats and exit")
     parser.add_argument("--models",      action="store_true", help="Show model performance stats")
     parser.add_argument("--test",        action="store_true", help="Test mode: show answers but don't post")
+    parser.add_argument("--verbose",     action="store_true",
+                        help="Verbose mode: print full prompt and raw model output before post-processing")
     parser.add_argument("--topics",      type=str, default=None,
                         help="Override discovery topics (comma-separated)")
     parser.add_argument("--min-stars",   type=int, default=None,
@@ -2090,9 +2301,10 @@ def main():
     args = parser.parse_args()
 
     bot = GalaxyBrainBot()
+    bot.verbose = getattr(args, "verbose", False)
 
     if args.cache_clear:
-        cache._store.clear()
+        cache.clear()  # Use the new clear() method — thread-safe, no direct _store access
         console.print("[yellow]Cache cleared[/yellow]")
     if args.topics:
         bot.discovery_topics = [t.strip() for t in args.topics.split(",") if t.strip()]
@@ -2107,6 +2319,7 @@ def main():
     elif args.models:
         bot.show_model_stats()
     elif args.check:
+        console.print("[bold cyan]--check mode: checking accepted answers only (no posting)[/bold cyan]")
         bot.check_accepted()
     elif args.test:
         console.print("[yellow]TEST MODE — no answers will be posted[/yellow]")
