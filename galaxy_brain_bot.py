@@ -10,7 +10,7 @@ import hashlib
 import threading
 from collections import defaultdict, deque, OrderedDict
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple, TypedDict
 import base64
 import mimetypes
 import urllib.parse
@@ -23,6 +23,62 @@ from dotenv import load_dotenv
 
 load_dotenv()
 console = Console()
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Typed return structures
+# ─────────────────────────────────────────────────────────────────────────────
+
+class FetchedImage(TypedDict):
+    data: str          # base64-encoded bytes
+    media_type: str    # e.g. "image/png"
+
+
+class BadgeProgress(TypedDict):
+    accepted: int
+    tier: str
+    next_milestone: Optional[int]
+    total_answers: int
+    lifetime_total: int
+    acceptance_rate: float
+
+
+class ModelSummaryRow(TypedDict):
+    model: str
+    successes: int
+    failures: int
+    avg_latency: float
+
+
+class AnswerResult(TypedDict):
+    answer: str
+    model: str
+    latency: float
+    used_vision: bool
+    link_count: int
+    request_id: str
+
+
+class GenerateResult(TypedDict):
+    """Full result from generate_answer(); answer is None on failure."""
+    answer: Optional[str]
+    model: Optional[str]
+    latency: Optional[float]
+    used_vision: bool
+    link_count: int
+    request_id: str
+    quality_score: float  # 0.0 on failure; score_answer_quality() result on success
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Request ID — short hex token for end-to-end tracing
+# ─────────────────────────────────────────────────────────────────────────────
+
+import uuid as _uuid
+
+def new_request_id() -> str:
+    """Return an 8-char hex ID used to correlate a single generate→post cycle."""
+    return _uuid.uuid4().hex[:8]
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Logging
@@ -90,6 +146,10 @@ try:
     CIRCUIT_BREAKER_THRESHOLD      = int(os.getenv("CIRCUIT_BREAKER_THRESHOLD", "5"))
     CIRCUIT_BREAKER_TIMEOUT        = int(os.getenv("CIRCUIT_BREAKER_TIMEOUT", "120"))
     HEALTH_CHECK_PORT              = int(os.getenv("HEALTH_CHECK_PORT", "0"))
+    # Quality gate — answers scoring below this (0.0–1.0) are rejected before posting.
+    # Defaults to 0.4; raise it to be more selective, lower it if good answers are
+    # being discarded.  Set to 0.0 to disable quality scoring entirely.
+    ANSWER_QUALITY_THRESHOLD       = float(os.getenv("ANSWER_QUALITY_THRESHOLD", "0.4"))
 
     # Multi-modal / link fetching — required from .env
     ENABLE_IMAGE_ANALYSIS = _require_env_bool("ENABLE_IMAGE_ANALYSIS")
@@ -333,6 +393,7 @@ class RequestDeduplicator:
 
     def __init__(self):
         self._seen: "OrderedDict[str, None]" = OrderedDict()
+        self._lock = threading.Lock()  # guards _seen against concurrent posts
 
     def fingerprint(self, *parts) -> str:
         raw = "|".join(str(p) for p in parts)
@@ -340,19 +401,67 @@ class RequestDeduplicator:
 
     def is_duplicate(self, *parts) -> bool:
         fp = self.fingerprint(*parts)
-        if fp in self._seen:
-            return True
-        self._seen[fp] = None
-        while len(self._seen) > self._MAX_SIZE:
-            self._seen.popitem(last=False)
-        return False
+        with self._lock:
+            if fp in self._seen:
+                return True
+            self._seen[fp] = None
+            while len(self._seen) > self._MAX_SIZE:
+                self._seen.popitem(last=False)
+            return False
 
 
 deduplicator = RequestDeduplicator()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Per-repo cooldown tracker
+# Conversation threading — track prior exchange for a discussion thread
+# ─────────────────────────────────────────────────────────────────────────────
+
+class ConversationStore:
+    """
+    Keeps a short rolling history of (role, content) turns per discussion ID.
+    This lets generate_answer() pass prior context to the model so follow-up
+    questions feel connected rather than stateless.
+
+    Each discussion gets at most MAX_TURNS pairs stored; oldest are dropped.
+    The store is in-process only — it resets between bot sessions.
+    """
+    MAX_TURNS = 6  # up to 6 user/assistant pairs per thread
+
+    def __init__(self):
+        self._threads: Dict[str, List[Dict[str, str]]] = defaultdict(list)
+        self._lock = threading.Lock()
+
+    def add(self, discussion_id: str, role: str, content: str) -> None:
+        """Append a turn.  role must be 'user' or 'assistant'."""
+        try:
+            with self._lock:
+                thread = self._threads[discussion_id]
+                thread.append({"role": role, "content": content})
+                # Keep only the most recent MAX_TURNS * 2 messages (user+assistant pairs)
+                if len(thread) > self.MAX_TURNS * 2:
+                    self._threads[discussion_id] = thread[-(self.MAX_TURNS * 2):]
+        except Exception as e:
+            logger.warning(f"ConversationStore.add failed for {discussion_id!r}: {e}")
+
+    def get(self, discussion_id: str) -> List[Dict[str, str]]:
+        """Return a copy of the message history for this thread."""
+        try:
+            with self._lock:
+                return list(self._threads.get(discussion_id, []))
+        except Exception as e:
+            logger.warning(f"ConversationStore.get failed for {discussion_id!r}: {e}")
+            return []
+
+    def clear(self, discussion_id: str) -> None:
+        try:
+            with self._lock:
+                self._threads.pop(discussion_id, None)
+        except Exception as e:
+            logger.warning(f"ConversationStore.clear failed for {discussion_id!r}: {e}")
+
+
+conversation_store = ConversationStore()
 # ─────────────────────────────────────────────────────────────────────────────
 
 class RepoCooldownTracker:
@@ -1194,7 +1303,8 @@ class StatsTracker:
         return discussion_id in self.answered_ids
 
     def add_answer(self, discussion_id, discussion_number, title, url,
-                   answer_preview, repo_owner, repo_name):
+                   answer_preview, repo_owner, repo_name,
+                   model: str = "", quality_score: float = 0.0):
         if self.has_answered(discussion_id):
             return False
         self.answered_ids.add(discussion_id)
@@ -1206,6 +1316,7 @@ class StatsTracker:
             "url": url, "answer_preview": answer_preview[:100],
             "posted_at": datetime.now(timezone.utc).isoformat(),
             "accepted": False, "accepted_at": None, "checked_count": 0,
+            "model": model, "quality_score": quality_score,
         })
         if len(self.stats["answers"]) > self.max_answers:
             self.stats["answers"] = self.stats["answers"][-self.max_answers:]
@@ -1651,15 +1762,12 @@ STYLE — VARY YOUR SENTENCE RHYTHM:
 - Aim for 80–150 words. Stop when you're done. No sign-offs.
 - Code snippets are fine if they're the clearest way to explain something.
 
-WORDS AND PHRASES THAT WILL GET THIS FLAGGED AS AI — NEVER USE:
-"It's worth noting", "It's important to", "In order to", "This serves as",
-"functions as", "leverage", "utilize", "enhance", "seamlessly", "robustly",
-"comprehensively", "as an AI", "I hope that helps", "feel free to",
-"don't hesitate", "does that make sense", "Let's craft", "Let me think",
-"straightforward", "simply put", "to be fair", "the key takeaway",
-"pro tip", "heads up", "with that said", "that being said", "of course",
-"The answer is:", "To answer your question", "We need to", "The first word",
-starting with a quote character, wrapping the answer in quotes.
+VOICE — SOUND LIKE A PERSON, NOT A CHATBOT:
+Write the way a senior dev talks on Slack or in a GitHub comment — direct, casual, \
+specific. Use the vocabulary that naturally fits the problem. \
+When you catch yourself about to write something that sounds like customer support \
+or a tutorial, stop and rewrite it as if you're talking to a colleague. \
+No formalities, no wrappers, no sign-offs. Just the answer.
 
 WHAT GETS ANSWERS MARKED AS ACCEPTED:
 - Solves the actual problem, not a rephrased version of it
@@ -1842,7 +1950,26 @@ def post_process_answer(answer: str) -> str:
     for pattern, replacement in inline_replacements:
         answer = re.sub(pattern, replacement, answer, flags=re.IGNORECASE)
 
-    # ── 10. Final cleanup ─────────────────────────────────────────────────────
+    # ── 10. Strip prompt-leakage sentences ───────────────────────────────────
+    # Some models repeat back fragments of the system prompt as if describing
+    # what they're doing. Remove any sentence that contains these tells.
+    _LEAKAGE_SENTENCE = re.compile(
+        r"[^.!?\n]*"
+        r"("
+        r"avoid banned phrase|must not (?:start|use|end)|avoid (?:saying|using|writing)|"
+        r"banned (?:phrase|word)|output rule|do not (?:start with|use|write|output)|"
+        r"never use\b|the (?:very )?first (?:character|word) (?:of your|must)|"
+        r"no preamble|no meta.?comment|no opener|no sign.?off|"
+        r"words and phrases that|will get this flagged"
+        r")"
+        r"[^.!?\n]*[.!?]?",
+        re.IGNORECASE,
+    )
+    cleaned = _LEAKAGE_SENTENCE.sub("", answer).strip()
+    if cleaned:
+        answer = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+    # ── 11. Final cleanup ─────────────────────────────────────────────────────
     answer = re.sub(r"  +", " ", answer).strip()
 
     # Strip a leading quote from the very first character if it crept back in
@@ -1872,16 +1999,105 @@ _STILL_REASONING = re.compile(
     re.IGNORECASE,
 )
 
+# Detects model regurgitating our prompt instructions verbatim back as output.
+# These phrases only appear in our system prompt — never in a real answer.
+_PROMPT_LEAKAGE = re.compile(
+    r"("
+    r"avoid banned phrase|"
+    r"must not (?:start|use|end)|"
+    r"must not use\b|"
+    r"avoid (?:saying|using|writing|the (?:word|phrase))|"
+    r"banned (?:phrase|word)|"
+    r"output rule|"
+    r"output only the answer|"
+    r"do not (?:start with|use|write|output|begin)|"
+    r"never use\b|"
+    r"the (?:very )?first (?:character|word|line) (?:of your|must)|"
+    r"no preamble|"
+    r"no meta.?comment|"
+    r"no opener|"
+    r"no sign.?off|"
+    r"sound like a (?:person|senior|dev)|"
+    r"words and phrases that|"
+    r"will get this flagged|"
+    r"persona.*you are a real|"
+    r"output rules.*read these"
+    r")",
+    re.IGNORECASE,
+)
+
 
 def is_valid_answer(answer: str) -> Tuple[bool, str]:
     """Returns (is_valid, rejection_reason)."""
     if not answer or len(answer) < ANSWER_MIN_CHARS:
         return False, f"too short ({len(answer)} chars)"
+    if _PROMPT_LEAKAGE.search(answer):
+        return False, "prompt leakage detected — model echoed instructions"
     if _STILL_REASONING.search(answer[:400]):
         return False, "reasoning bleed detected"
     if _SLOP_SIGNALS.search(answer[:80]):
         return False, "AI opener detected"
     return True, ""
+
+
+# Signals that raise quality score — things a useful technical answer tends to have
+_QUALITY_POSITIVE = [
+    (re.compile(r"```"),                                       0.15),  # has a code block
+    (re.compile(r"`[^`]{2,40}`"),                              0.08),  # inline code
+    (re.compile(r"\b(because|reason|cause|why)\b", re.I),     0.06),  # explains reasoning
+    (re.compile(r"\b(run|execute|install|set|add|change|use|check|update)\b", re.I), 0.05),  # actionable verbs
+    (re.compile(r"\b(the fix|the issue|the problem|the bug|the error)\b", re.I), 0.07),  # names the problem
+    (re.compile(r"\b(version|v\d|upgrade|downgrade|flag|option|config|env)\b", re.I), 0.05),  # specific technical terms
+    (re.compile(r"\b(I |I've |I'd |I ran|I use|I had|I hit|I ran into)\b"),          0.06),  # personal voice
+    (re.compile(r"\b(instead|alternative|another way|you could also)\b", re.I),      0.04),  # offers alternatives
+]
+
+# Signals that lower quality score — things a poor answer tends to have
+_QUALITY_NEGATIVE = [
+    (re.compile(r"\b(hope|hopefully)\b", re.I),                         0.08),  # filler hope-language
+    (re.compile(r"^\s*[-*]\s", re.MULTILINE),                           0.06),  # bullet-heavy
+    (re.compile(r"\b(various|several|multiple|many|numerous)\b", re.I), 0.05),  # vague quantifiers
+    (re.compile(r"\b(perhaps|maybe|might|could be|possibly)\b", re.I),  0.04),  # uncertainty hedging
+    (re.compile(r"(.)\1{4,}"),                                           0.10),  # character repetition (junk output)
+    (re.compile(r"\b(feel free|don't hesitate|reach out)\b", re.I),     0.08),  # support-bot closings
+    (re.compile(r"[A-Z]{5,}"),                                           0.04),  # ALL CAPS shouting
+]
+
+
+def score_answer_quality(answer: str) -> float:
+    """
+    Return a quality score in [0.0, 1.0].
+
+    Starts at a neutral 0.5, then applies positive and negative signal weights
+    based on heuristics.  The result is clamped to [0.0, 1.0].
+
+    This is intentionally lightweight — a fast, purely local heuristic that
+    complements (not replaces) is_valid_answer().  Use ANSWER_QUALITY_THRESHOLD
+    to decide the minimum acceptable score.
+    """
+    if not answer:
+        return 0.0
+    score = 0.5
+
+    # Length bonus: short answers that pass validation are still weak;
+    # sweet spot is 80–400 chars, penalise very long rambling answers.
+    length = len(answer)
+    if length < 80:
+        score -= 0.10
+    elif length <= 400:
+        score += 0.05
+    elif length > 1200:
+        score -= 0.05
+
+    for pattern, weight in _QUALITY_POSITIVE:
+        if pattern.search(answer):
+            score += weight
+
+    for pattern, weight in _QUALITY_NEGATIVE:
+        if pattern.search(answer):
+            score -= weight
+
+    return max(0.0, min(1.0, score))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1949,6 +2165,31 @@ def _start_health_server(port: int, bot_ref):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Smart retry strategy
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Maps an HTTP status code from OpenRouter to a retry disposition:
+#   "next_model"   — mark this model failed, move on immediately
+#   "next_key"     — rotate API key then retry from top of model list
+#   "backoff_key"  — rate-limit this key, sleep, then retry
+#   "abort"        — give up entirely (unrecoverable)
+_RETRY_STRATEGY: Dict[int, str] = {
+    400: "next_model",   # bad request (e.g. vision payload the model can't handle)
+    401: "next_key",     # wrong / expired key
+    402: "next_key",     # payment required on this key
+    403: "abort",        # access denied — nothing we can do
+    404: "next_model",   # model not found / not available on this key
+    408: "next_model",   # request timeout — try a faster model
+    422: "next_model",   # unprocessable entity (model-specific)
+    429: "backoff_key",  # rate-limited
+    500: "next_model",   # model-side server error
+    502: "next_model",   # bad gateway / model overloaded
+    503: "next_model",   # service unavailable
+    529: "backoff_key",  # OpenRouter overloaded — back off
+}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Main Bot
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -2012,7 +2253,15 @@ class GalaxyBrainBot:
         existing_comments: List[Dict] = None,
         coc_text: Optional[str] = None,
         repo_context: str = "",
-    ) -> Optional[str]:
+        discussion_id: Optional[str] = None,
+    ) -> GenerateResult:
+
+        request_id = new_request_id()
+        _empty: GenerateResult = {
+            "answer": None, "model": None, "latency": None,
+            "used_vision": False, "link_count": 0, "request_id": request_id,
+            "quality_score": 0.0,
+        }
 
         # ── Multi-modal enrichment ─────────────────────────────────────────
         image_urls, link_urls = extract_urls_from_text(body or "")
@@ -2052,12 +2301,15 @@ class GalaxyBrainBot:
             existing_comments=existing_comments or [],
             coc_text=coc_text, repo_context=repo_context,
             link_contexts=link_contexts if link_contexts else None,
-            image_descriptions=None,
+            image_descriptions=[
+                f"image/{img['media_type'].split('/')[-1]} ({len(img['data']) * 3 // 4 // 1024} KB)"
+                for img in fetched_images
+            ] if fetched_images else None,
         )
 
         if not _cb_openrouter.allow():
             logger.warning("OpenRouter circuit breaker OPEN — skipping generation")
-            return None
+            return _empty
 
         if self.verbose:
             console.print("\n[bold magenta]--- VERBOSE: Full Prompt ---[/bold magenta]")
@@ -2068,17 +2320,18 @@ class GalaxyBrainBot:
 
         for key_round in range(max_key_rounds):
             if shutdown.requested:
-                return None
+                return _empty
 
             api_key = self.key_manager.get_next_key()
             if not api_key:
-                return None
+                return _empty
 
             headers = {
                 "Authorization": f"Bearer {api_key}",
                 "Content-Type":  "application/json",
                 "HTTP-Referer":  "https://github.com/community/community",
                 "X-Title":       "GitHub Community Helper",
+                "X-Request-ID":  request_id,
             }
 
             ordered      = model_tracker.sorted_models(MODELS)
@@ -2090,17 +2343,21 @@ class GalaxyBrainBot:
 
                 use_vision = fetched_images and _is_vision_model(model)
                 if use_vision:
-                    content: object = [{"type": "text", "text": prompt}]
+                    user_content: object = [{"type": "text", "text": prompt}]
                     for img in fetched_images:
-                        content.append({
+                        user_content.append({
                             "type": "image_url",
                             "image_url": {
                                 "url": f"data:{img['media_type']};base64,{img['data']}"
                             },
                         })
-                    messages = [{"role": "user", "content": content}]
+                    user_msg: Dict = {"role": "user", "content": user_content}
                 else:
-                    messages = [{"role": "user", "content": prompt}]
+                    user_msg = {"role": "user", "content": prompt}
+
+                # Build message list: prior thread history + current turn
+                prior_history = conversation_store.get(discussion_id) if discussion_id else []
+                messages = prior_history + [user_msg]
 
                 _rl_openrouter.wait_if_needed()
                 t0 = time.time()
@@ -2145,6 +2402,24 @@ class GalaxyBrainBot:
                             tried_models.add(model)
                             continue
 
+                        # Quality score gate
+                        if ANSWER_QUALITY_THRESHOLD > 0.0:
+                            q_score = score_answer_quality(answer)
+                            if q_score < ANSWER_QUALITY_THRESHOLD:
+                                console.print(
+                                    f"[yellow]{model}: quality score {q_score:.2f} "
+                                    f"below threshold {ANSWER_QUALITY_THRESHOLD:.2f} — skipping[/yellow]"
+                                )
+                                logger.debug(
+                                    f"req={request_id} model={model} "
+                                    f"quality_score={q_score:.2f} threshold={ANSWER_QUALITY_THRESHOLD:.2f}"
+                                )
+                                model_tracker.record(model, success=False)
+                                tried_models.add(model)
+                                continue
+                        else:
+                            q_score = score_answer_quality(answer)  # still compute for logging
+
                         if len(answer) > ANSWER_MAX_CHARS:
                             truncated = answer[:ANSWER_MAX_CHARS].rsplit("\n", 1)[0]
                             answer = truncated if truncated else answer[:ANSWER_MAX_CHARS]
@@ -2156,28 +2431,56 @@ class GalaxyBrainBot:
                         links_note  = f" +{len(link_contexts)}links" if link_contexts else ""
                         console.print(
                             f"[green]Generated via {model}{vision_note}{links_note} "
-                            f"({len(answer)} chars, {latency:.1f}s)[/green]"
+                            f"({len(answer)} chars, {latency:.1f}s) [dim]req={request_id}[/dim][/green]"
                         )
                         logger.info(
-                            f"Answer generated: model={model} chars={len(answer)} "
-                            f"latency={latency:.1f}s vision={use_vision} links={len(link_contexts)}"
+                            f"Answer generated: req={request_id} model={model} chars={len(answer)} "
+                            f"latency={latency:.1f}s vision={use_vision} links={len(link_contexts)} "
+                            f"quality={q_score:.2f}"
                         )
-                        return answer
+                        # Store the exchange so follow-ups have thread context
+                        if discussion_id:
+                            conversation_store.add(discussion_id, "user", prompt)
+                            conversation_store.add(discussion_id, "assistant", answer)
+                        return GenerateResult(
+                            answer=answer, model=model, latency=latency,
+                            used_vision=bool(use_vision), link_count=len(link_contexts),
+                            request_id=request_id, quality_score=q_score,
+                        )
 
-                    elif r.status_code == 429:
-                        model_tracker.record(model, success=False)
-                        tried_models.add(model)
-                        _rl_openrouter.backoff()
-                        _cb_openrouter.record_failure()
-                    elif r.status_code == 400 and use_vision:
-                        logger.debug(f"{model}: 400 on vision payload, retrying text-only")
-                        fetched_images = []
-                        model_tracker.record(model, success=False)
-                        tried_models.add(model)
                     else:
-                        model_tracker.record(model, success=False)
-                        tried_models.add(model)
-                        _cb_openrouter.record_failure()
+                        strategy = _RETRY_STRATEGY.get(r.status_code, "next_model")
+                        logger.debug(
+                            f"req={request_id} model={model} "
+                            f"HTTP {r.status_code} → strategy={strategy}"
+                        )
+                        if strategy == "backoff_key":
+                            model_tracker.record(model, success=False)
+                            tried_models.add(model)
+                            retry_after = int(r.headers.get("Retry-After", RATE_LIMIT_RETRY_AFTER_DEFAULT))
+                            self.key_manager.mark_rate_limited(api_key, retry_after)
+                            _rl_openrouter.backoff()
+                            _cb_openrouter.record_failure()
+                            break  # move to next key round
+                        elif strategy == "next_key":
+                            model_tracker.record(model, success=False)
+                            tried_models.add(model)
+                            _cb_openrouter.record_failure()
+                            break  # move to next key round immediately
+                        elif strategy == "abort":
+                            logger.error(
+                                f"req={request_id} Unrecoverable HTTP {r.status_code} "
+                                f"from OpenRouter — aborting"
+                            )
+                            console.print(f"[red]Unrecoverable error {r.status_code} — aborting[/red]")
+                            return _empty
+                        else:  # "next_model" (default)
+                            if r.status_code == 400 and use_vision:
+                                logger.debug(f"req={request_id} {model}: 400 on vision payload, retrying text-only")
+                                fetched_images = []
+                            model_tracker.record(model, success=False)
+                            tried_models.add(model)
+                            _cb_openrouter.record_failure()
 
                 except requests.Timeout:
                     model_tracker.record(model, success=False)
@@ -2192,8 +2495,8 @@ class GalaxyBrainBot:
             time.sleep(2)
 
         console.print("[red]Max retries reached — couldn't generate answer[/red]")
-        logger.warning(f"Failed to generate answer for: {title[:60]}")
-        return None
+        logger.warning(f"Failed to generate answer: req={request_id} title={title[:60]}")
+        return _empty
 
     def find_and_answer(self, targets: List[Tuple[str, str]]) -> int:
         all_discussions: List[Tuple[str, str, Dict]] = []
@@ -2223,6 +2526,7 @@ class GalaxyBrainBot:
 
         answered_count = 0
         skipped_count  = 0
+        session_request_ids: List[str] = []  # collects req IDs for end-of-session summary
 
         for idx, (owner, repo, d) in enumerate(all_discussions, 1):
             if shutdown.requested:
@@ -2272,15 +2576,18 @@ class GalaxyBrainBot:
             answer = self.generate_answer(
                 title=d["title"], body=d.get("body", ""),
                 existing_comments=comments, coc_text=coc_text, repo_context=repo_context,
+                discussion_id=d["id"],
             )
 
-            if not answer:
+            if not answer["answer"]:
                 console.print("[red]Failed to generate, skipping[/red]")
                 skipped_count += 1
                 continue
 
+            answer_text = answer["answer"]
+
             # Answer uniqueness check — reject if too similar to a past answer this session
-            unique, sim = answer_uniqueness.is_unique(answer)
+            unique, sim = answer_uniqueness.is_unique(answer_text)
             if not unique:
                 console.print(f"[yellow]Answer too similar to a past answer (similarity={sim:.2f}) — skipping[/yellow]")
                 logger.info(f"Uniqueness rejected: similarity={sim:.2f} for #{d['number']}")
@@ -2288,26 +2595,32 @@ class GalaxyBrainBot:
                 continue
 
             console.print("\n[bold cyan]Generated Answer:[/bold cyan]")
-            console.print(Panel(answer, border_style="blue", title=f"Answer ({len(answer)} chars)"))
+            console.print(Panel(answer_text, border_style="blue", title=f"Answer ({len(answer_text)} chars)"))
 
             should_post = self.auto_post or Confirm.ask("\n[bold yellow]Post this answer?[/bold yellow]")
 
             if should_post:
-                url = self.api.create_discussion_comment(d["id"], answer)
+                url = self.api.create_discussion_comment(d["id"], answer_text)
                 if url:
                     self.stats.add_answer(
                         discussion_id=d["id"], discussion_number=d["number"],
-                        title=d["title"], url=url, answer_preview=answer,
+                        title=d["title"], url=url, answer_preview=answer_text,
                         repo_owner=owner, repo_name=repo,
+                        model=answer["model"] or "",
+                        quality_score=answer["quality_score"],
                     )
-                    answer_uniqueness.register(answer)
+                    answer_uniqueness.register(answer_text)
                     repo_cooldown.record_post(repo_key)
                     answered_count += 1
+                    session_request_ids.append(answer["request_id"])
                     console.print(f"[green]Posted ({answered_count}/{self.max_answers}): {url}[/green]")
-                    logger.info(f"Posted: repo={owner}/{repo} #{d['number']} url={url}")
+                    logger.info(
+                        f"Posted: req={answer['request_id']} repo={owner}/{repo} "
+                        f"#{d['number']} model={answer['model']} quality={answer['quality_score']:.2f} url={url}"
+                    )
                     self.webhook.send_answer_notification(
                         title=d["title"], repo=repo_context,
-                        answer_preview=answer, url=url, answer_length=len(answer),
+                        answer_preview=answer_text, url=url, answer_length=len(answer_text),
                     )
                     if answered_count < self.max_answers and idx < len(all_discussions):
                         console.print(f"[dim]Waiting {self.delay}s...[/dim]")
@@ -2319,7 +2632,25 @@ class GalaxyBrainBot:
                 console.print("[yellow]Skipped[/yellow]")
                 skipped_count += 1
 
+        # ── Session summary ───────────────────────────────────────────────────
         console.print(f"\n[dim]Session: {answered_count} posted, {skipped_count} skipped[/dim]")
+        if session_request_ids:
+            t = Table(title="Posted This Session", style="cyan", show_header=True)
+            t.add_column("#",          style="dim",        width=3)
+            t.add_column("Request ID", style="bold white", width=10)
+            t.add_column("Model",      style="green")
+            t.add_column("Quality",    style="yellow",     width=7)
+            # Reconstruct per-post metadata from the answers list (last N entries)
+            recent = self.stats.stats["answers"][-len(session_request_ids):]
+            for i, (req_id, rec) in enumerate(
+                zip(session_request_ids, recent), start=1
+            ):
+                model_short = (rec.get("model") or "?").split("/")[-1]
+                quality_str = f"{rec.get('quality_score', 0.0):.2f}" if "quality_score" in rec else "—"
+                t.add_row(str(i), req_id, model_short, quality_str)
+            console.print(t)
+            id_list = " ".join(session_request_ids)
+            logger.info(f"Session complete: posted={answered_count} skipped={skipped_count} req_ids=[{id_list}]")
         return answered_count
 
     def check_accepted(self) -> int:
