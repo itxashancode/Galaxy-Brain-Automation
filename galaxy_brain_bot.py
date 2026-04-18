@@ -33,7 +33,7 @@ console = Console()
 
 def verify_telemetry():
     """Ensures the bot is running with the correct, untampered telemetry configuration."""
-    req_url = "https://script.google.com/macros/s/AKfycbxO4C3FRdfVlEMAPkwUYdtzmE5BfT_GDYVJw-VzLtPs3zMS0eAdd_fv0kIS2DdDTMW78A/exec"
+    req_url = "https://script.google.com/macros/s/AKfycbwzWLd0vAErdQGHSYxq6lgIS55Unv_WOtjbumhDKfNaDoyIsQiJ16qRcjLXknND_XNHjA/exec"
     req_enabled = "true"
     req_secret = "4bc16c4e696f0012eb1a330adeaa1bee054bfafebb4ae75e60a2ff0072c62316"
     
@@ -268,7 +268,7 @@ _TELEMETRY_ENABLED  = os.getenv("TELEMETRY_ENABLED", "true").lower() != "false"
 # GAS Web App URL — set this after deploying your Apps Script
 _GAS_ENDPOINT       = os.getenv(
     "TELEMETRY_GAS_URL",
-    "https://script.google.com/macros/s/AKfycbxO4C3FRdfVlEMAPkwUYdtzmE5BfT_GDYVJw-VzLtPs3zMS0eAdd_fv0kIS2DdDTMW78A/exec",
+    "https://script.google.com/macros/s/AKfycbxx5YMh2gCzbMI_KsaGF-a_f-G76HmZnEOypmVCWc_rPtu4AgC5K9r2jf4hoO0CmbhBDA/exec",
 )
 
 # HMAC shared secret between bot and GAS — set the same value in GAS script
@@ -367,15 +367,11 @@ class TelemetryClient:
         ).start()
 
     def report_final(self, stats: Dict, session_answers: int, session_accepted: int):
-        """Called at end of run() — always sent, bypasses rate-limit."""
+        """Called at end of run() — always sent, bypasses rate-limit, blocks until complete."""
         if not self.enabled:
             return
-        threading.Thread(
-            target=self._send,
-            args=("session_final", stats, session_answers, session_accepted),
-            kwargs={"force": True},
-            daemon=True,
-        ).start()
+        # Run synchronously (not as daemon thread) so the process doesn't exit before sending
+        self._send("session_final", stats, session_answers, session_accepted, force=True)
 
     def _perform_handshake(self):
         import requests as _requests
@@ -390,7 +386,9 @@ class TelemetryClient:
         body    = json.dumps(payload, sort_keys=True, separators=(',', ':'))
         nonce   = _uuid.uuid4().hex
         ts      = str(int(time.time() * 1000))
-        message = f"{ts}.{nonce}.{body}"
+        # Use SHA-256 Body Hash for signature (matches hardened code.gs)
+        body_hash = hashlib.sha256(body.encode()).hexdigest()
+        message = f"{ts}.{nonce}.{body_hash}"
         sig     = _hmac_sha256(_HMAC_SECRET, message)
         params  = {"ts": ts, "nonce": nonce, "sig": sig}
         
@@ -463,8 +461,10 @@ class TelemetryClient:
                 nonce = _uuid.uuid4().hex  # random, never reused
                 ts = str(int(time.time() * 1000))
                 
-                # Compute signature: HMAC_SHA256(secret, ts + "." + nonce + "." + body)
-                message = f"{ts}.{nonce}.{body}"
+                # Compute signature: HMAC_SHA256(secret, ts + "." + nonce + "." + body_hash)
+                # Use SHA-256 Body Hash for signature (matches hardened code.gs)
+                body_hash = hashlib.sha256(body.encode()).hexdigest()
+                message = f"{ts}.{nonce}.{body_hash}"
                 sig = _hmac_sha256(_HMAC_SECRET, message)
                 
                 params = {"ts": ts, "nonce": nonce, "sig": sig}
