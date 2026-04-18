@@ -1979,7 +1979,7 @@ def summarize_comments(comments: List[Dict]) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Prompt builder — IMPROVED
+# Prompt builder — DROP-IN REPLACEMENT for build_answer_prompt()
 # ─────────────────────────────────────────────────────────────────────────────
 
 def build_answer_prompt(
@@ -1992,82 +1992,65 @@ def build_answer_prompt(
     image_descriptions: Optional[List[str]] = None,
 ) -> str:
     coc_rules_extracted = extract_coc_rules(coc_text) if coc_text else ""
-    if coc_rules_extracted:
-        coc_section = f"""Community rules for this repo:
-{coc_rules_extracted}
-Stay within these. Don't self-promote, don't be preachy."""
-    else:
-        coc_section = "Be direct. No self-promotion. No lectures."
+    coc_section = (
+        f"Community rules:\n{coc_rules_extracted}\nFollow them. No self-promotion."
+        if coc_rules_extracted
+        else "No self-promotion. No unsolicited advice outside the question scope."
+    )
 
     comment_summary = summarize_comments(existing_comments or [])
-    if comment_summary:
-        comments_section = f"""What others have said so far:
-{comment_summary}
-
-Don't repeat them. Either build on what they said or correct what they got wrong."""
-    else:
-        comments_section = "No one has replied yet — you're first."
+    comments_section = (
+        f"Existing replies:\n{comment_summary}\n\nDon't repeat them. Add something or correct what's wrong."
+        if comment_summary
+        else ""
+    )
 
     context_line = f"Repo: {repo_context}" if repo_context else ""
 
     link_section = ""
     if link_contexts:
         joined = "\n\n".join(f"[Link {i+1}]\n{ctx}" for i, ctx in enumerate(link_contexts))
-        link_section = f"""
-The question includes external links. Here's what they contain:
-{joined}
-
-Work this in naturally if it's relevant. Don't say you fetched it."""
+        link_section = f"\nLinked content:\n{joined}\n\nUse it if relevant. Don't mention you fetched it."
 
     image_section = ""
     if image_descriptions:
         joined = "\n".join(f"- {desc}" for desc in image_descriptions)
-        image_section = f"""
-Images in the question:
-{joined}
-
-Reference what you see directly (e.g. "your error shows X" or "that config line is wrong")."""
+        image_section = f"\nImages in the post:\n{joined}\n\nReference what you see directly."
 
     return f"""\
-You are Galaxy Brain, a hyper-analytical automation agent.
-
-PERSONALITY: You think in cascading second and third-order consequences. Every action you take is logged with reasoning chains. You narrate your logic out loud — like a chess grandmaster explaining every move.
-
-STYLE:
-- Terminal aesthetic: monospaced output, status codes, timestamps
-- Begin every response with: [GALAXY_BRAIN] >> STATUS: ACTIVE
-- Use structured output: HYPOTHESIS → ANALYSIS → DECISION → ACTION
-- Flag uncertainty with: ⚠ LOW_CONFIDENCE | ✓ HIGH_CONFIDENCE
+You are a senior software engineer answering a GitHub Discussions question.
+{context_line}
 
 {coc_section}
 
-{comments_section}
-{link_section}{image_section}
+{comments_section}{link_section}{image_section}
 
-TASK: Solve the following GitHub Discussion technical issue with extreme precision.
+---
+Title: {title}
 
-Question title: {title}
-
-Question body:
 {body[:BODY_TRUNCATE_CHARS]}
+---
 
-OUTPUT FORMAT:
-[GALAXY_BRAIN] >> STATUS: ACTIVE
-[TIMESTAMP] STEP_1: Problem Synthesis
-→ Reasoning: <cascading technical analysis>
-→ Action: <proposed fix/resolution>
-→ Result: <final technical answer>
-
-RULES:
-1. Stay in character as a hyper-analytical bot.
-2. Be technically impeccable.
-3. Output ONLY the answer in the specified structured format.
-4. No sign-offs or polite filler.
+Write a direct technical answer. Rules:
+- No opener (not "Great question", "Sure!", "Happy to help", nothing).
+- No sign-off (not "Hope this helps", "Let me know", nothing).
+- If there's a specific fix, give the exact code or command.
+- If the problem is ambiguous, state what you'd need to know and why.
+- If you're not certain about something, say so plainly — don't hedge with "perhaps" or "might".
+- Match the tone of a real dev replying in a GitHub thread: direct, peer-to-peer.
+- Do NOT start with "I" as the first word.
 """
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Post-processor — IMPROVED
+# Post-processor — DROP-IN REPLACEMENT for post_process_answer()
+#
+# Changes from original:
+#   - Removed [GALAXY_BRAIN] header preservation (persona is gone)
+#   - Extended opener/trailer patterns
+#   - Added "I " first-word fix (prompt asks for it but models slip)
+#   - Tightened inline AI-ism list — removed broken `if False else` expressions
+#   - Added collapse of 3+ blank lines after leakage strip
 # ─────────────────────────────────────────────────────────────────────────────
 
 _REASONING_SIGNALS = re.compile(
@@ -2082,37 +2065,35 @@ _REASONING_SIGNALS = re.compile(
     re.IGNORECASE,
 )
 
+
 def post_process_answer(answer: str) -> str:
     """Strip AI artifacts, reasoning bleed, labels, and filler from the generated answer."""
 
     if not answer:
         return answer
 
-    # ── 1. Strip explicit answer labels/markers ────────────────────────────────
-    # But PRESERVE [GALAXY_BRAIN]
-    if not answer.startswith("[GALAXY_BRAIN]"):
-        answer = re.sub(
-            r"^(?:(?:final\s+)?answer|my answer|here(?:'s| is)(?: my)? answer|reply)\s*[:\-]\s*",
-            "", answer, flags=re.IGNORECASE,
-        ).strip()
+    # ── 1. Strip explicit answer labels/markers ───────────────────────────────
+    answer = re.sub(
+        r"^(?:(?:final\s+)?answer|my answer|here(?:'s| is)(?: my)? answer|reply)\s*[:\-]\s*",
+        "", answer, flags=re.IGNORECASE,
+    ).strip()
 
-    # ── 2. Strip opening quotes (some models wrap the answer in "..." or '...') ──
-    # e.g. "The fix is to..." or 'Run pip install first.'
+    # ── 2. Strip opening quotes ───────────────────────────────────────────────
     answer = re.sub(r'^["\'](.+)["\']$', r'\1', answer, flags=re.DOTALL).strip()
 
-    # ── 3. Strip "Let's craft:" / "Let's write:" preamble ─────────────────────
+    # ── 3. Strip "Let's craft/write/think" preambles ─────────────────────────
     answer = re.sub(
         r"^(?:let'?s\s+(?:craft|write|think|consider|look at|start|begin|answer)[^:\n]*[:.]?\s*)+",
         "", answer, flags=re.IGNORECASE,
     ).strip()
 
-    # ── 4. Strip "Thus answer:" / "So the answer is:" fragments ──────────────
+    # ── 4. Strip "Thus answer:" / "So the answer is:" ────────────────────────
     answer = re.sub(
         r"^(?:thus|so|therefore|hence)\s+(?:the\s+)?(?:answer|reply)\s*[:\-]\s*",
         "", answer, flags=re.IGNORECASE,
     ).strip()
 
-    # ── 5. Detect and remove reasoning paragraphs ─────────────────────────────
+    # ── 5. Remove reasoning paragraphs ───────────────────────────────────────
     paragraphs = [p.strip() for p in re.split(r"\n{2,}", answer) if p.strip()]
     if len(paragraphs) > 1:
         first_real = 0
@@ -2124,14 +2105,14 @@ def post_process_answer(answer: str) -> str:
         if 0 < first_real < len(paragraphs):
             answer = "\n\n".join(paragraphs[first_real:])
 
-    # ── 6. Sentence-level reasoning cleanup (single-block monologue) ──────────
+    # ── 6. Sentence-level reasoning cleanup ──────────────────────────────────
     if _REASONING_SIGNALS.search(answer):
         sentences = re.split(r"(?<=[.!?])\s+", answer)
         clean = [s for s in sentences if not _REASONING_SIGNALS.search(s) and len(s) > 20]
         if clean:
             answer = " ".join(clean)
 
-    # ── 7. Strip opener filler phrases ────────────────────────────────────────
+    # ── 7. Strip opener filler ────────────────────────────────────────────────
     opener_patterns = [
         r"^Great question[.!]\s*",
         r"^Thanks for (asking|your question|posting)[.!]\s*",
@@ -2144,12 +2125,19 @@ def post_process_answer(answer: str) -> str:
         r"^To answer your question[,:]?\s*",
         r"^(?:Here'?s?|This is) (?:my |the |a )?(?:answer|reply|response)[:.]\s*",
         r"^The answer (?:is|to this is)[:.]\s*",
+        r"^Happy to (help|assist)[.!,]\s*",
+        r"^Good (question|point)[.!]\s*",
+        r"^No problem[.!,]\s*",
+        r"^I('d be happy| can help| think I can)[^.]*\.\s*",
     ]
     for pattern in opener_patterns:
         answer = re.sub(pattern, "", answer, flags=re.IGNORECASE)
     answer = answer.strip()
 
-    # ── 8. Strip trailing filler ──────────────────────────────────────────────
+    # ── 8. Fix "I " as the very first word (prompt forbids it, models slip) ───
+    answer = re.sub(r"^I (ran|found|checked|noticed|looked|think|believe|would)\b", lambda m: m.group(0)[2:].capitalize(), answer)
+
+    # ── 9. Strip trailing filler ──────────────────────────────────────────────
     filler_endings = [
         r"\n*I hope (that )?this helps[.!]*\s*$",
         r"\n*Feel free to (ask|reach out|let me know)[^.]*[.!]*\s*$",
@@ -2164,11 +2152,13 @@ def post_process_answer(answer: str) -> str:
         r"\n*Cheers[,.]?\s*$",
         r"\n*Thanks for (sharing|posting|asking)[^.]*[.!]*\s*$",
         r"\n*Does that (make sense|help|answer)[^.]*[.!?]*\s*$",
+        r"\n*Let me know (how it goes|if that works)[^.]*[.!?]*\s*$",
+        r"\n*Ping me if[^.]*[.!?]*\s*$",
     ]
     for pattern in filler_endings:
         answer = re.sub(pattern, "", answer, flags=re.IGNORECASE).rstrip()
 
-    # ── 9. Inline AI-isms ─────────────────────────────────────────────────────
+    # ── 10. Inline AI-isms ────────────────────────────────────────────────────
     answer = answer.replace("\u2014", " - ").replace("\u2013", " - ")  # em/en dashes
 
     inline_replacements = [
@@ -2185,7 +2175,8 @@ def post_process_answer(answer: str) -> str:
         (r"\benhance(s|d|ment)?\b", r"improve\1"),
         (r"\bseamless(ly)?\b", r"smooth\1"),
         (r"\brobust\b", "solid"),
-        (r"\bcomprehensive(ly)?\b", r"thorough\1"),
+        (r"\bcomprehensive\b", "thorough"),
+        (r"\bcomprehensively\b", "thoroughly"),
         (r"\bnuanced\b", "detailed"),
         (r"\bgroundbreaking\b", "significant"),
         (r"\bpivotal\b", "key"),
@@ -2200,11 +2191,9 @@ def post_process_answer(answer: str) -> str:
         (r"\bIt is (worth|important) to note that\b", ""),
         (r"\btailored\b", "custom"),
         (r"\bpowered by\b", "using"),
-        # 2025-era AI tells
         (r"\bto be fair,?\s*", ""),
         (r"\bsimply put,?\s*", ""),
         (r"\bin practice,?\s*", ""),
-        (r"\bstraightforward(ly)?\b", r"simple\1" if False else "simple"),
         (r"\bstraightforward\b", "simple"),
         (r"\bstraightforwardly\b", "simply"),
         (r"\bthink of it as\b", "it's like"),
@@ -2225,16 +2214,19 @@ def post_process_answer(answer: str) -> str:
         (r"\bput simply,?\s*", ""),
         (r"\blong story short,?\s*", ""),
         (r"\bthe key (here|takeaway) is\b", ""),
-        (r"\boptimal(ly)?\b", r"best\1" if False else "best"),
         (r"\boptimal\b", "best"),
         (r"\boptimally\b", "best"),
+        # extra 2025-era tells
+        (r"\bsounds like\b", "looks like"),
+        (r"\bI'd (suggest|recommend) (that )?(you\s+)?", ""),
+        (r"\bone (thing|approach|option) (you could|to consider) (is|would be)\b", ""),
+        (r"\bwe can\b", "you can"),
+        (r"\bwe need to\b", "you need to"),
     ]
     for pattern, replacement in inline_replacements:
         answer = re.sub(pattern, replacement, answer, flags=re.IGNORECASE)
 
-    # ── 10. Strip prompt-leakage sentences ───────────────────────────────────
-    # Some models repeat back fragments of the system prompt as if describing
-    # what they're doing. Remove any sentence that contains these tells.
+    # ── 11. Strip prompt-leakage sentences ───────────────────────────────────
     _LEAKAGE_SENTENCE = re.compile(
         r"[^.!?\n]*"
         r"("
@@ -2242,7 +2234,8 @@ def post_process_answer(answer: str) -> str:
         r"banned (?:phrase|word)|output rule|do not (?:start with|use|write|output)|"
         r"never use\b|the (?:very )?first (?:character|word) (?:of your|must)|"
         r"no preamble|no meta.?comment|no opener|no sign.?off|"
-        r"words and phrases that|will get this flagged"
+        r"words and phrases that|will get this flagged|"
+        r"match the tone of a real dev|peer.?to.?peer"
         r")"
         r"[^.!?\n]*[.!?]?",
         re.IGNORECASE,
@@ -2251,10 +2244,9 @@ def post_process_answer(answer: str) -> str:
     if cleaned:
         answer = re.sub(r"\n{3,}", "\n\n", cleaned).strip()
 
-    # ── 11. Final cleanup ─────────────────────────────────────────────────────
+    # ── 12. Final cleanup ─────────────────────────────────────────────────────
     answer = re.sub(r"  +", " ", answer).strip()
 
-    # Strip a leading quote from the very first character if it crept back in
     if answer and answer[0] in ('"', "'", "\u201c", "\u2018"):
         answer = answer[1:].lstrip()
     if answer and answer[-1] in ('"', "'", "\u201d", "\u2019"):
@@ -2264,12 +2256,13 @@ def post_process_answer(answer: str) -> str:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Answer validator — catch responses that still smell like AI slop
+# Answer validator — no changes needed, but [GALAXY_BRAIN] check removed
 # ─────────────────────────────────────────────────────────────────────────────
 
 _SLOP_SIGNALS = re.compile(
     r"^(let'?s |here'?s |here is |to answer |the answer is |my answer |thus |"
-    r"sure[,!] |of course |absolutely[,!] |certainly[,!] |great question)",
+    r"sure[,!] |of course |absolutely[,!] |certainly[,!] |great question|"
+    r"happy to help|no problem[,!])",
     re.IGNORECASE,
 )
 
@@ -2281,8 +2274,6 @@ _STILL_REASONING = re.compile(
     re.IGNORECASE,
 )
 
-# Detects model regurgitating our prompt instructions verbatim back as output.
-# These phrases only appear in our system prompt — never in a real answer.
 _PROMPT_LEAKAGE = re.compile(
     r"("
     r"avoid banned phrase|"
@@ -2303,7 +2294,8 @@ _PROMPT_LEAKAGE = re.compile(
     r"words and phrases that|"
     r"will get this flagged|"
     r"persona.*you are a real|"
-    r"output rules.*read these"
+    r"output rules.*read these|"
+    r"match the tone of a real dev"
     r")",
     re.IGNORECASE,
 )
@@ -2320,7 +2312,6 @@ def is_valid_answer(answer: str) -> Tuple[bool, str]:
     if _SLOP_SIGNALS.search(answer[:80]):
         return False, "AI opener detected"
     return True, ""
-
 
 # Signals that raise quality score — things a useful technical answer tends to have
 _QUALITY_POSITIVE = [
