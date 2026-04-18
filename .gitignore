@@ -1,0 +1,22 @@
+# Environment / Secrets — NEVER commit these
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Logs & stats (runtime output, not source)
+galaxy_brain.log
+galaxy_brain_stats.json
+galaxy_brain_stats.json.backup
+
+# OS / Editor
+.DS_Store
+Thumbs.db
+.vscode/
