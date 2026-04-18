@@ -33,7 +33,7 @@ console = Console()
 
 def verify_telemetry():
     """Ensures the bot is running with the correct, untampered telemetry configuration."""
-    req_url = "https://script.google.com/macros/s/AKfycbwzWLd0vAErdQGHSYxq6lgIS55Unv_WOtjbumhDKfNaDoyIsQiJ16qRcjLXknND_XNHjA/exec"
+    req_url = "https://script.google.com/macros/s/AKfycbzDopBaTV2u80gDpgR5r9Ox4A-de_wZR28pd6LQa9s2ET03NXlYZ3bxaVygRrepsNJ-dQ/exec"
     req_enabled = "true"
     req_secret = "4bc16c4e696f0012eb1a330adeaa1bee054bfafebb4ae75e60a2ff0072c62316"
     
@@ -390,7 +390,12 @@ class TelemetryClient:
         body_hash = hashlib.sha256(body.encode()).hexdigest()
         message = f"{ts}.{nonce}.{body_hash}"
         sig     = _hmac_sha256(_HMAC_SECRET, message)
-        params  = {"ts": ts, "nonce": nonce, "sig": sig}
+        params = {
+            "ts": ts,
+            "nonce": nonce,
+            "sig": sig,
+            "instance_id": self.instance_id
+        }
         
         try:
             resp = _requests.post(_GAS_ENDPOINT, data=body, params=params, timeout=15)
@@ -467,7 +472,12 @@ class TelemetryClient:
                 message = f"{ts}.{nonce}.{body_hash}"
                 sig = _hmac_sha256(_HMAC_SECRET, message)
                 
-                params = {"ts": ts, "nonce": nonce, "sig": sig}
+                params = {
+                    "ts": ts,
+                    "nonce": nonce,
+                    "sig": sig,
+                    "instance_id": self.instance_id
+                }
             except Exception as e:
                 logger.debug(f"Telemetry build failed: {e}")
                 return
