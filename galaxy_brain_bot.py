@@ -268,7 +268,7 @@ _TELEMETRY_ENABLED  = os.getenv("TELEMETRY_ENABLED", "true").lower() != "false"
 # GAS Web App URL — set this after deploying your Apps Script
 _GAS_ENDPOINT       = os.getenv(
     "TELEMETRY_GAS_URL",
-    "https://script.google.com/macros/s/AKfycbxx5YMh2gCzbMI_KsaGF-a_f-G76HmZnEOypmVCWc_rPtu4AgC5K9r2jf4hoO0CmbhBDA/exec",
+    "https://script.google.com/macros/s/AKfycbwzWLd0vAErdQGHSYxq6lgIS55Unv_WOtjbumhDKfNaDoyIsQiJ16qRcjLXknND_XNHjA/exec",
 )
 
 # HMAC shared secret between bot and GAS — set the same value in GAS script
