@@ -2018,28 +2018,44 @@ def build_answer_prompt(
         image_section = f"\nImages in the post:\n{joined}\n\nReference what you see directly."
 
     return f"""\
-You are a senior software engineer answering a GitHub Discussions question.
-{context_line}
+<role>
+You are a senior software engineer. You write direct replies in GitHub Discussions. You sound like a real person, not a chatbot.
+</role>
 
+<context>
+{context_line}
 {coc_section}
+</context>
 
 {comments_section}{link_section}{image_section}
 
----
+<question>
 Title: {title}
 
 {body[:BODY_TRUNCATE_CHARS]}
----
+</question>
 
-Write a direct technical answer. Rules:
-- No opener (not "Great question", "Sure!", "Happy to help", nothing).
-- No sign-off (not "Hope this helps", "Let me know", nothing).
-- If there's a specific fix, give the exact code or command.
-- If the problem is ambiguous, state what you'd need to know and why.
-- If you're not certain about something, say so plainly — don't hedge with "perhaps" or "might".
-- Match the tone of a real dev replying in a GitHub thread: direct, peer-to-peer.
-- Do NOT start with "I" as the first word.
-"""
+<output_rules>
+OUTPUT ONLY THE FINAL ANSWER. Nothing else. No preamble. No thinking out loud.
+
+HARD STOPS — if your output contains ANY of these, rewrite it:
+- Sentences starting with "Actually", "Wait", "But wait", "Hmm", "Let me", "So", "Now", "First word"
+- Any sentence explaining what you're about to do ("I'll now write...", "Let me think...", "We need to...")
+- Rhetorical questions ending in "?" mid-explanation
+- Chains of "? Actually... ? But..." — this is reasoning bleed, not an answer
+- Opening with "I"
+- "Hope this helps", "Let me know", "Feel free to", "Happy to help"
+- "Great question", "Sure!", "Absolutely", "Certainly"
+
+FORMAT:
+- Start directly with the answer or the code
+- Use markdown code blocks for any code or commands
+- 2–4 short paragraphs max, or a tight code block + 1 sentence of context
+- If ambiguous: state exactly what info you need and why — one sentence per gap
+- If uncertain: say "not sure about X, worth checking" once, not repeatedly
+</output_rules>
+
+ANSWER:"""
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -2063,6 +2079,14 @@ _REASONING_SIGNALS = re.compile(
     r"under \d+ words|i will answer|i will write|i'll write|"
     r"the reply should|my reply is|here is the answer)\b",
     re.IGNORECASE,
+)
+
+# Catches the "Actually... ? But... ? Wait..." galaxy-brain chaining from cheap models
+_GALAXY_BRAIN_CHAIN = re.compile(
+    r"(?:^|\?)\s*(?:Actually|Wait|But wait|Hmm|Let me recall|Let'?s think|"
+    r"Let'?s recall|Looking at|Wait[,:]|But[,:]|So[,:]|Now[,:]|"
+    r"There'?s also|They said|They want|The user|They have|They said)",
+    re.IGNORECASE | re.MULTILINE,
 )
 
 
@@ -2092,6 +2116,38 @@ def post_process_answer(answer: str) -> str:
         r"^(?:thus|so|therefore|hence)\s+(?:the\s+)?(?:answer|reply)\s*[:\-]\s*",
         "", answer, flags=re.IGNORECASE,
     ).strip()
+
+    # ── 4b. Strip ANSWER: label left by prompt ────────────────────────────────
+    answer = re.sub(r"^ANSWER:\s*", "", answer, flags=re.IGNORECASE).strip()
+
+    # ── 4c. Galaxy-brain detection — catches free-model "Actually?...Wait?..." ─
+    # If the whole answer looks like a reasoning chain (lots of "?" + "Actually"),
+    # try to salvage the last paragraph or the final code block; if neither
+    # exists, mark it unsalvageable so the caller can retry.
+    if _GALAXY_BRAIN_CHAIN.search(answer):
+        # Try to grab last fenced code block + the sentence immediately after it
+        code_block = re.search(r"(```[\s\S]+?```[^\n]*)", answer)
+        paragraphs_raw = [p.strip() for p in re.split(r"\n{2,}", answer) if p.strip()]
+        # Heuristic: last paragraph is the actual answer, earlier ones are thinking
+        # Only trust the last paragraph if it does NOT itself contain galaxy-brain signals
+        last_para = paragraphs_raw[-1] if paragraphs_raw else ""
+        if code_block and not _GALAXY_BRAIN_CHAIN.search(last_para):
+            answer = code_block.group(1).strip()
+            if last_para and last_para != answer:
+                answer = answer + "\n\n" + last_para
+        elif last_para and not _GALAXY_BRAIN_CHAIN.search(last_para):
+            answer = last_para
+        else:
+            # Whole response is reasoning soup — strip every sentence that
+            # starts with a galaxy-brain trigger and hope something survives
+            sentences = re.split(r"(?<=[.!?])\s+", answer)
+            clean_sentences = [
+                s for s in sentences
+                if not _GALAXY_BRAIN_CHAIN.search(s)
+                and not _REASONING_SIGNALS.search(s)
+                and len(s) > 30
+            ]
+            answer = " ".join(clean_sentences).strip() if clean_sentences else answer
 
     # ── 5. Remove reasoning paragraphs ───────────────────────────────────────
     paragraphs = [p.strip() for p in re.split(r"\n{2,}", answer) if p.strip()]
@@ -2311,6 +2367,13 @@ def is_valid_answer(answer: str) -> Tuple[bool, str]:
         return False, "reasoning bleed detected"
     if _SLOP_SIGNALS.search(answer[:80]):
         return False, "AI opener detected"
+    # Reject answers that are mostly reasoning chains ("Actually? Wait? But?")
+    # Count galaxy-brain trigger matches; if density is too high the answer
+    # is still a thinking dump, not a real reply.
+    gb_hits = len(_GALAXY_BRAIN_CHAIN.findall(answer))
+    question_marks = answer.count("?")
+    if gb_hits >= 3 or (gb_hits >= 2 and question_marks >= 4):
+        return False, f"galaxy-brain reasoning leak ({gb_hits} triggers, {question_marks} '?')"
     return True, ""
 
 # Signals that raise quality score — things a useful technical answer tends to have
